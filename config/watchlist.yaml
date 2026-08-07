@@ -1,0 +1,184 @@
+version: 1
+
+# Add the companies, products, executives, branded programs, and business metrics
+# that should trigger a notification. Identity terms must match before a record
+# is scored, which helps avoid alerts for generic words such as "streams".
+organizations:
+  - name: Spotify
+    enabled: true
+    aliases:
+      - Spotify
+      - Spotify Technology
+    products:
+      - Spotify Wrapped
+      - Spotify Charts
+      - Spotify Premium
+      - Spotify for Artists
+    executives: []
+    metrics:
+      - stream
+      - streams
+      - monthly active users
+      - MAU
+      - subscribers
+      - downloads
+      - chart position
+      - top 50
+      - number one
+    stakeholders:
+      - Trust & Safety
+      - Fraud
+      - Data Science
+      - Product
+    playbook:
+      - Compare the referenced metric with bot, device, account-age, and geography cohorts.
+      - Flag affected product dashboards so leaders know the signal may be externally incentivized.
+
+  # Copy this block and set enabled: true for a client or your own company.
+  - name: Example Company
+    enabled: false
+    aliases:
+      - Example Company
+      - ExampleCo
+    products:
+      - Example App
+    executives:
+      - Example CEO
+    metrics:
+      - daily active users
+      - payment volume
+      - app store ranking
+    stakeholders:
+      - Risk
+      - Security
+    playbook:
+      - Open an internal incident record and assign a named owner.
+
+# These categories make the score explainable. Each category contributes its
+# weight once when any of its terms appears in the market title or rules.
+risk_categories:
+  popularity_and_ranking:
+    weight: 20
+    terms:
+      - rank
+      - ranking
+      - chart
+      - top 10
+      - top 50
+      - number one
+      - most popular
+      - trending
+      - bestseller
+      - award
+      - win an award
+    stakeholders:
+      - Product Analytics
+      - Trust & Safety
+    actions:
+      - Review ranking, recommendation, and discovery systems for coordinated activity.
+
+  engagement_manipulation:
+    weight: 25
+    terms:
+      - stream
+      - streams
+      - views
+      - likes
+      - downloads
+      - installs
+      - votes
+      - ratings
+      - reviews
+      - listens
+      - followers
+      - impressions
+    stakeholders:
+      - Fraud
+      - Trust & Safety
+      - Data Science
+    actions:
+      - Increase monitoring for automation, new-account velocity, repeated devices, and concentrated traffic sources.
+
+  platform_action:
+    weight: 20
+    terms:
+      - ban
+      - banned
+      - suspend
+      - suspended
+      - remove
+      - removed
+      - reinstate
+      - deplatform
+      - approve
+      - verify
+      - list
+      - delist
+      - launch
+      - release
+      - feature
+      - featured
+    stakeholders:
+      - Legal
+      - Communications
+      - Trust & Safety
+    actions:
+      - Check whether reports, complaints, or policy-enforcement queues could be gamed before settlement.
+
+  user_growth:
+    weight: 18
+    terms:
+      - daily active users
+      - DAU
+      - monthly active users
+      - MAU
+      - subscribers
+      - signups
+      - registrations
+      - active users
+      - user growth
+    stakeholders:
+      - Growth
+      - Product Analytics
+      - Finance
+    actions:
+      - Separate durable customer growth from paid, bot, duplicate, or low-retention cohorts.
+
+  financial_metric:
+    weight: 15
+    terms:
+      - revenue
+      - sales
+      - GMV
+      - gross merchandise value
+      - payment volume
+      - transaction volume
+      - valuation
+      - market share
+      - earnings
+    stakeholders:
+      - Finance
+      - Legal
+      - Investor Relations
+    actions:
+      - Reconcile the referenced measure to controlled finance data before internal or external reporting.
+
+  explicit_abuse_language:
+    weight: 30
+    terms:
+      - bot
+      - bots
+      - fake accounts
+      - fake streams
+      - manipulate
+      - manipulation
+      - stream farm
+      - coordinated campaign
+      - brigading
+      - astroturf
+    stakeholders:
+      - Fraud
+      - Security
+      - Legal
+    actions:
+      - Escalate for immediate abuse review and preserve relevant logs under the incident-retention policy.

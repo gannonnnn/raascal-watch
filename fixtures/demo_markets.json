@@ -1,0 +1,58 @@
+[
+  {
+    "source": "demo",
+    "external_id": "spotify-top-50-demo",
+    "title": "Will Nova Lane reach number one on Spotify's Global Top 50 before August 31?",
+    "description": "Resolves Yes if the artist appears at number one on the Spotify Global Top 50 chart.",
+    "url": "https://example.com/demo/spotify-top-50",
+    "status": "open",
+    "created_at": "2026-08-05T15:00:00Z",
+    "closes_at": "2026-08-31T23:59:00Z",
+    "probability": 0.62,
+    "volume": 275000,
+    "volume_24h": 82000,
+    "liquidity": 42000
+  },
+  {
+    "source": "demo",
+    "external_id": "spotify-remove-demo",
+    "title": "Will Spotify remove Artist X from editorial playlists before August 14?",
+    "description": "Resolves Yes if Spotify removes the artist from all named editorial playlists.",
+    "url": "https://example.com/demo/spotify-remove",
+    "status": "open",
+    "created_at": "2026-08-05T15:10:00Z",
+    "closes_at": "2026-08-14T17:00:00Z",
+    "probability": 0.31,
+    "volume": 38000,
+    "volume_24h": 12000,
+    "liquidity": 9600
+  },
+  {
+    "source": "demo",
+    "external_id": "spotify-mau-demo",
+    "title": "Will Spotify report more than 750 million monthly active users this quarter?",
+    "description": "Resolves using Spotify's published quarterly shareholder materials.",
+    "url": "https://example.com/demo/spotify-mau",
+    "status": "open",
+    "created_at": "2026-08-05T15:20:00Z",
+    "closes_at": "2026-10-31T17:00:00Z",
+    "probability": 0.44,
+    "volume": 8100,
+    "volume_24h": 2200,
+    "liquidity": 4100
+  },
+  {
+    "source": "demo",
+    "external_id": "unrelated-demo",
+    "title": "Will the Federal Reserve cut interest rates at its next meeting?",
+    "description": "An unrelated macroeconomic record used to confirm watchlist filtering.",
+    "url": "https://example.com/demo/unrelated",
+    "status": "open",
+    "created_at": "2026-08-05T15:30:00Z",
+    "closes_at": "2026-09-16T18:00:00Z",
+    "probability": 0.53,
+    "volume": 5000000,
+    "volume_24h": 900000,
+    "liquidity": 1250000
+  }
+]

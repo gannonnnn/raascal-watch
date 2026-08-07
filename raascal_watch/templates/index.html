@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RaaScal Watch</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">IW</div>
+      <div>
+        <h1>RaaScal Watch</h1>
+        <p>External incentive intelligence</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="system-state {{ 'running' if scanner_running else '' }}">
+        <span></span>{{ 'Scanning' if scanner_running else 'Monitoring' }}
+      </div>
+      <button id="scan-button" class="primary-button" type="button">Run scan</button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Prediction-market monitoring MVP</p>
+        <h2>Know when an outside financial incentive appears around your platform.</h2>
+        <p class="hero-copy">Kalshi and Polymarket are checked every {{ poll_interval }} minutes. The first successful scan creates a silent baseline; later matching contracts become alerts.</p>
+      </div>
+      <div class="watching-card">
+        <span class="small-label">Watching</span>
+        <strong>{{ watched_organizations | join(', ') if watched_organizations else 'No valid watchlist' }}</strong>
+        <span class="small-label">Delivery</span>
+        <strong>{{ configured_channels | join(', ') if configured_channels else 'Dashboard + console' }}</strong>
+      </div>
+    </section>
+
+    {% if config_error %}
+      <div class="banner error"><strong>Watchlist error:</strong> {{ config_error }}</div>
+    {% endif %}
+
+    {% for state in stats.source_states if state.last_error %}
+      <div class="banner warning"><strong>{{ state.source | title }} collector:</strong> {{ state.last_error }}</div>
+    {% endfor %}
+
+    <section class="stat-grid" aria-label="Monitoring summary">
+      <article class="stat-card"><span>Markets indexed</span><strong>{{ stats.markets }}</strong></article>
+      <article class="stat-card"><span>Watchlist matches</span><strong>{{ stats.matches }}</strong></article>
+      <article class="stat-card"><span>High / critical</span><strong>{{ stats.high_risk }}</strong></article>
+      <article class="stat-card"><span>Needs review</span><strong>{{ stats.unacknowledged }}</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Alert queue</p>
+          <h3>Matched contracts</h3>
+        </div>
+        <span class="last-scan">Last scan: {{ stats.last_scan | date }}</span>
+      </div>
+
+      <form class="filters" method="get">
+        <label>Organization
+          <select name="organization">
+            <option value="">All</option>
+            {% for item in stats.organizations %}
+              <option value="{{ item }}" {{ 'selected' if filters.organization == item else '' }}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Severity
+          <select name="severity">
+            <option value="">All</option>
+            {% for item in ['critical', 'high', 'medium', 'low'] %}
+              <option value="{{ item }}" {{ 'selected' if filters.severity == item else '' }}>{{ item | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Source
+          <select name="source">
+            <option value="">All</option>
+            {% for item in stats.sources %}
+              <option value="{{ item }}" {{ 'selected' if filters.source == item else '' }}>{{ item | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>State
+          <select name="alert_state">
+            <option value="">All</option>
+            {% for item in ['pending', 'sent', 'console_only', 'failed', 'source_error', 'baseline', 'historical', 'acknowledged'] %}
+              <option value="{{ item }}" {{ 'selected' if filters.alert_state == item else '' }}>{{ item | replace('_', ' ') | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="secondary-button" type="submit">Apply</button>
+        <a class="text-button" href="/">Clear</a>
+      </form>
+
+      {% if matches %}
+        <div class="alert-list">
+          {% for item in matches %}
+            <article class="alert-card severity-{{ item.severity }}" id="match-{{ item.match_id }}">
+              <div class="alert-main">
+                <div class="alert-title-row">
+                  <span class="severity-badge">{{ item.severity }}</span>
+                  <span class="source-badge">{{ item.source }}</span>
+                  <span class="state-badge">{{ item.alert_state | replace('_', ' ') }}</span>
+                </div>
+                <a class="market-title" href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
+                <p class="match-line">Matched <strong>{{ item.organization }}</strong> via {{ item.matched_identity_terms | join(', ') }}</p>
+                <div class="metric-row">
+                  <div><span>Risk score</span><strong>{{ item.risk_score }}/100</strong></div>
+                  <div><span>Probability</span><strong>{{ item.probability | probability }}</strong></div>
+                  <div><span>Volume</span><strong>{{ item.volume | money }}</strong></div>
+                  <div><span>Closes</span><strong>{{ item.closes_at | date }}</strong></div>
+                </div>
+              </div>
+              <div class="alert-actions">
+                {% if not item.acknowledged_at %}
+                  <button class="ack-button" type="button" data-match-id="{{ item.match_id }}">Acknowledge</button>
+                {% else %}
+                  <span class="acknowledged">Acknowledged</span>
+                {% endif %}
+              </div>
+              <details>
+                <summary>Review rationale and playbook</summary>
+                <div class="detail-grid">
+                  <div>
+                    <h4>Why it matched</h4>
+                    <ul>{% for reason in item.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+                  </div>
+                  <div>
+                    <h4>Suggested owners</h4>
+                    <p>{{ item.stakeholders | join(', ') }}</p>
+                    <h4>Suggested actions</h4>
+                    <ol>{% for action in item.actions %}<li>{{ action }}</li>{% endfor %}</ol>
+                  </div>
+                </div>
+              </details>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state">
+          <strong>No matching contracts in this view.</strong>
+          <p>Run the demo seed or complete a live scan after configuring the watchlist.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="panel compact-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Operations</p><h3>Recent source scans</h3></div>
+      </div>
+      {% if scans %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Source</th><th>Finished</th><th>Fetched</th><th>New</th><th>Matches</th><th>Alerts</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for scan in scans %}
+                <tr>
+                  <td>{{ scan.source | title }}</td>
+                  <td>{{ scan.finished_at | date }}</td>
+                  <td>{{ scan.fetched }}</td>
+                  <td>{{ scan.new_markets }}</td>
+                  <td>{{ scan.matches }}</td>
+                  <td>{{ scan.notifications }}</td>
+                  <td><span class="scan-status {{ 'bad' if scan.error else 'good' }}">{{ 'Error' if scan.error else 'Healthy' }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-state small"><p>No scans have completed yet.</p></div>
+      {% endif %}
+    </section>
+
+    <p class="disclaimer">RaaScal Watch identifies public contracts that may change the economics of manipulating a monitored company or metric. An alert is not evidence of misconduct, market manipulation, or platform abuse.</p>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', path='/app.js') }}"></script>
+</body>
+</html>
