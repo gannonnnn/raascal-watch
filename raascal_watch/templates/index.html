@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-     <div class="brand-mark" aria-hidden="true">RW</div>
+      <div class="brand-mark" aria-hidden="true">RW</div>
       <div>
         <h1>RaaScal Watch</h1>
         <p>External incentive intelligence</p>
@@ -32,7 +32,13 @@
       </div>
       <div class="watching-card">
         <span class="small-label">Watching</span>
-        <strong>{{ watched_organizations | join(', ') if watched_organizations else 'No valid watchlist' }}</strong>
+        {% if watched_organizations %}
+          <div class="watchlist-tags">
+            {% for item in watched_organizations %}<span>{{ item }}</span>{% endfor %}
+          </div>
+        {% else %}
+          <strong>No valid watchlist</strong>
+        {% endif %}
         <span class="small-label">Delivery</span>
         <strong>{{ configured_channels | join(', ') if configured_channels else 'Dashboard + console' }}</strong>
       </div>
@@ -47,17 +53,17 @@
     {% endfor %}
 
     <section class="stat-grid" aria-label="Monitoring summary">
-      <article class="stat-card"><span>Markets indexed</span><strong>{{ stats.markets }}</strong></article>
-      <article class="stat-card"><span>Watchlist matches</span><strong>{{ stats.matches }}</strong></article>
-      <article class="stat-card"><span>High / critical</span><strong>{{ stats.high_risk }}</strong></article>
-      <article class="stat-card"><span>Needs review</span><strong>{{ stats.unacknowledged }}</strong></article>
+      <article class="stat-card"><span>Market records indexed</span><strong>{{ stats.markets }}</strong></article>
+      <article class="stat-card"><span>Candidate matches</span><strong>{{ stats.matches }}</strong></article>
+      <article class="stat-card"><span>High-priority candidates</span><strong>{{ stats.high_risk }}</strong></article>
+      <article class="stat-card"><span>New since baseline</span><strong>{{ stats.unacknowledged }}</strong></article>
     </section>
 
     <section class="panel">
       <div class="panel-heading">
         <div>
           <p class="eyebrow">Alert queue</p>
-          <h3>Matched contracts</h3>
+          <h3>Candidate contract matches</h3>
         </div>
         <span class="last-scan">Last scan: {{ stats.last_scan | date }}</span>
       </div>

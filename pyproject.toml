@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "raascal-watch"
-version = "0.1.0"
-description = "External incentive intelligence for operational risk teams"
+version = "0.2.0"
+description = "External incentive intelligence for public prediction markets"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Karissa Gannon" }]
@@ -22,7 +22,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-"raascal-watch" = "raascal_watch.cli:main"
+raascal-watch = "raascal_watch.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["raascal_watch*"]

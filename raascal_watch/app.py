@@ -92,7 +92,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="RaaScal Watch",
-    version="0.1.0",
+    version="0.2.0",
     description="External incentive intelligence for public prediction markets.",
     lifespan=lifespan,
 )

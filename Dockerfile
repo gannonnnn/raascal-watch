@@ -2,8 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    RW_DB_PATH=/app/data/raascal_watch.db \
-    RW_WATCHLIST_PATH=/app/config/watchlist.yaml
+    RAASCAL_DB_PATH=/app/data/raascal_watch.db \
+    RAASCAL_WATCHLIST_PATH=/app/config/watchlist.yaml
 
 WORKDIR /app
 COPY . /app

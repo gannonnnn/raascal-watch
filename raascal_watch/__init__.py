@@ -1,3 +1,3 @@
-"""RaaScal Watch: external incentive intelligence for operational risk teams."""
+"""RaaScal Watch: external incentive intelligence for prediction markets."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

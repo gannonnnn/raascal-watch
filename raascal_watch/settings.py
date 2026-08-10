@@ -10,15 +10,30 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+def _env(name: str) -> str | None:
+    """Read the current RAASCAL_* setting, with RW_* kept as a legacy alias.
+
+    Early setup instructions used the shorter RW_* prefix. Supporting both avoids
+    breaking existing local .env files while keeping RAASCAL_* as the documented
+    prefix going forward.
+    """
+    value = os.getenv(name)
+    if value is not None:
+        return value
+    if name.startswith("RAASCAL_"):
+        return os.getenv(f"RW_{name.removeprefix('RAASCAL_')}")
+    return None
+
+
 def _bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
+    raw = _env(name)
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _int(name: str, default: int, minimum: int = 1) -> int:
-    raw = os.getenv(name)
+    raw = _env(name)
     if raw is None:
         return default
     try:
@@ -28,7 +43,7 @@ def _int(name: str, default: int, minimum: int = 1) -> int:
 
 
 def _float(name: str, default: float, minimum: float = 0.1) -> float:
-    raw = os.getenv(name)
+    raw = _env(name)
     if raw is None:
         return default
     try:
@@ -38,7 +53,7 @@ def _float(name: str, default: float, minimum: float = 0.1) -> float:
 
 
 def _path(name: str, default: Path) -> Path:
-    raw = os.getenv(name)
+    raw = _env(name)
     if not raw:
         return default.resolve()
 
@@ -76,35 +91,39 @@ class Settings:
 def get_settings() -> Settings:
     recipients = tuple(
         item.strip()
-        for item in os.getenv("RW_SMTP_TO", "").split(",")
+        for item in (_env("RAASCAL_SMTP_TO") or "").split(",")
         if item.strip()
     )
     return Settings(
-        db_path=_path("RW_DB_PATH", PROJECT_ROOT / "data" / "raascal_watch.db"),
-        watchlist_path=_path("RW_WATCHLIST_PATH", PROJECT_ROOT / "config" / "watchlist.yaml"),
-        poll_interval_minutes=_int("RW_POLL_INTERVAL_MINUTES", 15),
-        request_timeout_seconds=_float("RW_REQUEST_TIMEOUT_SECONDS", 30.0),
-        max_pages_per_source=_int("RW_MAX_PAGES_PER_SOURCE", 100),
-        alert_on_first_scan=_bool("RW_ALERT_ON_FIRST_SCAN", False),
-        alert_on_new_match_for_existing_market=_bool(
-            "RW_ALERT_ON_NEW_MATCH_FOR_EXISTING_MARKET", False
+        db_path=_path("RAASCAL_DB_PATH", PROJECT_ROOT / "data" / "raascal_watch.db"),
+        watchlist_path=_path(
+            "RAASCAL_WATCHLIST_PATH", PROJECT_ROOT / "config" / "watchlist.yaml"
         ),
-        run_scan_on_startup=_bool("RW_RUN_SCAN_ON_STARTUP", True),
-        enable_kalshi=_bool("RW_ENABLE_KALSHI", True),
-        enable_polymarket=_bool("RW_ENABLE_POLYMARKET", True),
-        kalshi_base_url=os.getenv(
-            "RW_KALSHI_BASE_URL", "https://external-api.kalshi.com/trade-api/v2"
+        poll_interval_minutes=_int("RAASCAL_POLL_INTERVAL_MINUTES", 15),
+        request_timeout_seconds=_float("RAASCAL_REQUEST_TIMEOUT_SECONDS", 30.0),
+        max_pages_per_source=_int("RAASCAL_MAX_PAGES_PER_SOURCE", 100),
+        alert_on_first_scan=_bool("RAASCAL_ALERT_ON_FIRST_SCAN", False),
+        alert_on_new_match_for_existing_market=_bool(
+            "RAASCAL_ALERT_ON_NEW_MATCH_FOR_EXISTING_MARKET", False
+        ),
+        run_scan_on_startup=_bool("RAASCAL_RUN_SCAN_ON_STARTUP", True),
+        enable_kalshi=_bool("RAASCAL_ENABLE_KALSHI", True),
+        enable_polymarket=_bool("RAASCAL_ENABLE_POLYMARKET", True),
+        kalshi_base_url=(
+            _env("RAASCAL_KALSHI_BASE_URL")
+            or "https://external-api.kalshi.com/trade-api/v2"
         ).rstrip("/"),
-        polymarket_base_url=os.getenv(
-            "RW_POLYMARKET_BASE_URL", "https://gamma-api.polymarket.com"
+        polymarket_base_url=(
+            _env("RAASCAL_POLYMARKET_BASE_URL")
+            or "https://gamma-api.polymarket.com"
         ).rstrip("/"),
-        generic_webhook_url=os.getenv("RW_GENERIC_WEBHOOK_URL") or None,
-        slack_webhook_url=os.getenv("RW_SLACK_WEBHOOK_URL") or None,
-        smtp_host=os.getenv("RW_SMTP_HOST") or None,
-        smtp_port=_int("RW_SMTP_PORT", 587),
-        smtp_username=os.getenv("RW_SMTP_USERNAME") or None,
-        smtp_password=os.getenv("RW_SMTP_PASSWORD") or None,
-        smtp_from=os.getenv("RW_SMTP_FROM") or None,
+        generic_webhook_url=_env("RAASCAL_GENERIC_WEBHOOK_URL") or None,
+        slack_webhook_url=_env("RAASCAL_SLACK_WEBHOOK_URL") or None,
+        smtp_host=_env("RAASCAL_SMTP_HOST") or None,
+        smtp_port=_int("RAASCAL_SMTP_PORT", 587),
+        smtp_username=_env("RAASCAL_SMTP_USERNAME") or None,
+        smtp_password=_env("RAASCAL_SMTP_PASSWORD") or None,
+        smtp_from=_env("RAASCAL_SMTP_FROM") or None,
         smtp_to=recipients,
-        smtp_use_tls=_bool("RW_SMTP_USE_TLS", True),
+        smtp_use_tls=_bool("RAASCAL_SMTP_USE_TLS", True),
     )

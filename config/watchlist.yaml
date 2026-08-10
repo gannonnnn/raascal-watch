@@ -1,8 +1,8 @@
-version: 1
+version: 2
 
-# Add the companies, products, executives, branded programs, and business metrics
-# that should trigger a notification. Identity terms must match before a record
-# is scored, which helps avoid alerts for generic words such as "streams".
+# RaaScal Watch begins with an identity match, then evaluates the surrounding
+# contract for monitored metrics and explainable risk categories. A match is a
+# candidate for review, not evidence that abuse or manipulation has occurred.
 organizations:
   - name: Spotify
     enabled: true
@@ -29,12 +29,132 @@ organizations:
       - Trust & Safety
       - Fraud
       - Data Science
-      - Product
+      - Product Analytics
     playbook:
-      - Compare the referenced metric with bot, device, account-age, and geography cohorts.
+      - Compare the referenced metric with bot, device, account-age, geography, and traffic-source cohorts.
       - Flag affected product dashboards so leaders know the signal may be externally incentivized.
 
-  # Copy this block and set enabled: true for a client or your own company.
+  - name: Cloudflare
+    enabled: true
+    aliases:
+      - Cloudflare
+      - Cloudflare Inc
+    products:
+      - Cloudflare Workers
+      - Cloudflare Pages
+      - Cloudflare Zero Trust
+      - Cloudflare One
+      - Cloudflare R2
+      - Cloudflare WAF
+      - Cloudflare Radar
+      - 1.1.1.1
+    executives: []
+    metrics:
+      - outage
+      - critical incident
+      - service disruption
+      - downtime
+      - availability
+      - latency
+      - degraded service
+      - DDoS
+      - denial of service
+      - DNS outage
+      - network incident
+      - security incident
+      - data breach
+      - status page
+    stakeholders:
+      - Security Operations
+      - Threat Intelligence
+      - Site Reliability Engineering
+      - Incident Response
+      - Legal
+    playbook:
+      - Correlate market creation, odds movement, and settlement timing with service telemetry, DDoS signals, vulnerability reports, and threat-intelligence activity.
+      - Preserve a snapshot of the contract and relevant security or availability logs without treating the market itself as proof of an attack.
+      - Escalate unusual market activity near settlement to Security Operations and Site Reliability Engineering for a time-bound review.
+
+  - name: YouTube
+    enabled: true
+    aliases:
+      - YouTube
+      - YouTube.com
+    products:
+      - YouTube Shorts
+      - YouTube Music
+      - YouTube Premium
+      - YouTube Live
+      - YouTube Trending
+      - YouTube TV
+    executives: []
+    metrics:
+      - video views
+      - views
+      - view count
+      - views in first week
+      - watch time
+      - subscribers
+      - subscriber count
+      - likes
+      - comments
+      - concurrent viewers
+      - trending
+      - trending position
+      - upload date
+      - upload time
+      - livestream
+      - number one
+    stakeholders:
+      - Trust & Safety
+      - Abuse Prevention
+      - Creator Integrity
+      - Product Analytics
+      - Security
+    playbook:
+      - Compare the referenced engagement with account-age, device, geography, referral-source, paid-promotion, and retention cohorts.
+      - Determine whether the resolution source is a public YouTube counter, chart, or enforcement decision that could be directly influenced.
+      - Separate creator-controlled behavior from platform abuse before changing detection models or product decisions.
+
+  - name: MrBeast / Beast Industries
+    enabled: true
+    aliases:
+      - MrBeast
+      - Mr Beast
+      - Jimmy Donaldson
+      - Beast Industries
+    products:
+      - Beast Games
+      - Feastables
+      - Beast Philanthropy
+    executives: []
+    metrics:
+      - video views
+      - views in first week
+      - subscriber count
+      - upload date
+      - upload time
+      - next video
+      - next YouTube video
+      - video title
+      - words spoken
+      - will say
+      - will mention
+      - episode release
+      - product launch
+    stakeholders:
+      - Creator Operations
+      - Legal
+      - Compliance
+      - Insider Risk
+      - Security
+      - Analytics
+    playbook:
+      - Identify employees, production partners, agencies, sponsors, or vendors with advance access to scripts, upload timing, titles, or release plans.
+      - Distinguish outcomes the creator can directly control from outcomes requiring coordinated audience or platform manipulation.
+      - Review unusual engagement separately from paid promotion and preserve the relevant production and analytics timeline.
+
+  # Copy this block and set enabled: true for a client or another research profile.
   - name: Example Company
     enabled: false
     aliases:
@@ -54,8 +174,9 @@ organizations:
     playbook:
       - Open an internal incident record and assign a named owner.
 
-# These categories make the score explainable. Each category contributes its
-# weight once when any of its terms appears in the market title or rules.
+# Each category contributes its weight once when any configured term appears in
+# the contract title or rules. Categories only score after an organization or
+# product identity has matched.
 risk_categories:
   popularity_and_ranking:
     weight: 20
@@ -83,7 +204,12 @@ risk_categories:
       - stream
       - streams
       - views
+      - video views
+      - view count
+      - watch time
       - likes
+      - comments
+      - shares
       - downloads
       - installs
       - votes
@@ -91,13 +217,69 @@ risk_categories:
       - reviews
       - listens
       - followers
+      - subscribers
+      - subscriber count
       - impressions
+      - concurrent viewers
     stakeholders:
       - Fraud
       - Trust & Safety
       - Data Science
     actions:
-      - Increase monitoring for automation, new-account velocity, repeated devices, and concentrated traffic sources.
+      - Increase monitoring for automation, new-account velocity, repeated devices, concentrated traffic sources, and low-retention engagement.
+
+  availability_and_incident:
+    weight: 28
+    terms:
+      - outage
+      - critical incident
+      - service disruption
+      - downtime
+      - offline
+      - unavailable
+      - degraded service
+      - service degradation
+      - latency
+      - DDoS
+      - denial of service
+      - cyberattack
+      - security incident
+      - network incident
+      - data breach
+      - DNS outage
+      - status page
+    stakeholders:
+      - Security Operations
+      - Site Reliability Engineering
+      - Incident Response
+      - Threat Intelligence
+    actions:
+      - Compare market timing and movement with availability telemetry, security alerts, vulnerability disclosures, and incident-response activity.
+
+  direct_control_and_advance_knowledge:
+    weight: 22
+    terms:
+      - will say
+      - will mention
+      - next video
+      - next YouTube video
+      - upload date
+      - upload time
+      - video title
+      - publish a video
+      - release a video
+      - livestream
+      - script
+      - prepared remarks
+      - announcement timing
+      - episode release
+    stakeholders:
+      - Legal
+      - Compliance
+      - Insider Risk
+      - Creator Operations
+    actions:
+      - Identify people with direct control of, or advance access to, the outcome and review relevant employee, contractor, and vendor obligations.
 
   platform_action:
     weight: 20
@@ -123,7 +305,7 @@ risk_categories:
       - Communications
       - Trust & Safety
     actions:
-      - Check whether reports, complaints, or policy-enforcement queues could be gamed before settlement.
+      - Check whether reports, complaints, policy-enforcement queues, publication timing, or launch decisions could be gamed before settlement.
 
   user_growth:
     weight: 18
@@ -133,6 +315,7 @@ risk_categories:
       - monthly active users
       - MAU
       - subscribers
+      - subscriber count
       - signups
       - registrations
       - active users
@@ -142,7 +325,7 @@ risk_categories:
       - Product Analytics
       - Finance
     actions:
-      - Separate durable customer growth from paid, bot, duplicate, or low-retention cohorts.
+      - Separate durable customer growth from paid, bot, duplicate, coordinated, or low-retention cohorts.
 
   financial_metric:
     weight: 15
@@ -168,14 +351,23 @@ risk_categories:
     terms:
       - bot
       - bots
+      - view bot
+      - view bots
+      - subscriber bot
       - fake accounts
       - fake streams
+      - artificial traffic
+      - click farm
+      - traffic farm
       - manipulate
       - manipulation
       - stream farm
       - coordinated campaign
+      - coordinated viewing
       - brigading
       - astroturf
+      - DDoS
+      - denial of service
     stakeholders:
       - Fraud
       - Security

@@ -76,6 +76,13 @@ a { color: inherit; }
   display: grid; gap: 5px; box-shadow: var(--shadow);
 }
 .watching-card strong { margin-bottom: 12px; }
+.watchlist-tags { display: flex; flex-wrap: wrap; gap: 7px; margin: 3px 0 14px; }
+.watchlist-tags span {
+  display: inline-flex; align-items: center; max-width: 100%;
+  border: 1px solid rgba(255,255,255,.18); border-radius: 999px;
+  background: rgba(255,255,255,.08); color: white; padding: 4px 8px;
+  font-size: .72rem; font-weight: 750; line-height: 1.2;
+}
 .small-label { text-transform: uppercase; letter-spacing: .12em; color: #a9bbb7; font-size: .65rem; font-weight: 800; }
 
 .banner { border-radius: 12px; padding: 13px 16px; margin: 0 0 14px; font-size: .9rem; }

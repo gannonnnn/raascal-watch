@@ -70,7 +70,7 @@ class Scanner:
 
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         headers = {
-            "User-Agent": "RaaScalWatch/0.1 (external incentive intelligence; public market data)",
+            "User-Agent": "RaaScal-Watch/0.1 (external incentive intelligence; public market data)",
             "Accept": "application/json",
         }
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
