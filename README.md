@@ -26,6 +26,7 @@ RaaScal Watch is intended to surface the changed incentive environment before th
 ## What the prototype does
 
 - Collects public market listings from Kalshi and Polymarket
+- Automatically retries Kalshi through its documented compatibility host when the primary host returns HTTP 403 or cannot be reached
 - Matches contracts against a configurable company watchlist
 - Detects references to companies, products, executives, and monitored metrics
 - Assigns a transparent operational-risk score
@@ -40,7 +41,7 @@ The prototype only reads public market-listing data. It does not place trades, a
 
 ## Included research profiles
 
-Version 0.2 includes enabled profiles for:
+Version 0.2.1 includes enabled profiles for:
 
 - **Spotify** — engagement, streams, rankings, and product analytics
 - **Cloudflare** — availability, incidents, DDoS, and security operations
@@ -189,7 +190,7 @@ This is a customer-discovery and testing prototype, not a production multi-tenan
 - It does not correlate market activity with internal customer, device, transaction, stream, or product telemetry.
 - It does not include production authentication or role-based access controls.
 - SQLite is suitable for a local pilot, not a large multi-client deployment.
-- Public APIs and source schemas can change.
+- Public APIs and source schemas can change. The Kalshi collector uses its documented primary host and supported compatibility host, but either source can still be temporarily unavailable.
 
 ## Responsible interpretation
 

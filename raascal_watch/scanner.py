@@ -7,6 +7,7 @@ from typing import Iterable
 
 import httpx
 
+from . import __version__
 from .alerts import AlertDispatcher
 from .collectors import MarketCollector, enabled_collectors
 from .db import Database
@@ -70,7 +71,10 @@ class Scanner:
 
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         headers = {
-            "User-Agent": "RaaScal-Watch/0.1 (external incentive intelligence; public market data)",
+            "User-Agent": (
+                f"RaaScal-Watch/{__version__} "
+                "(external incentive intelligence; public market data)"
+            ),
             "Accept": "application/json",
         }
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:

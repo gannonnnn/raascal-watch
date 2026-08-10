@@ -26,6 +26,23 @@ class CollectorError(RuntimeError):
     pass
 
 
+class CollectorHTTPError(CollectorError):
+    """HTTP failure that preserves status and response detail for failover."""
+
+    def __init__(self, url: str, status_code: int, detail: str | None = None):
+        self.url = url
+        self.status_code = status_code
+        self.detail = detail
+        message = f"HTTP {status_code} for {url}"
+        if detail:
+            message = f"{message}: {detail}"
+        super().__init__(message)
+
+
+class CollectorTransportError(CollectorError):
+    """Network-layer failure such as DNS, connection, or timeout errors."""
+
+
 async def get_json(
     client: httpx.AsyncClient,
     url: str,
@@ -33,28 +50,57 @@ async def get_json(
     params: dict[str, Any] | None = None,
     attempts: int = 4,
 ) -> dict[str, Any]:
-    """Fetch JSON with conservative retry handling for transient API failures."""
+    """Fetch JSON with conservative retries and diagnostic HTTP errors."""
     last_error: Exception | None = None
     for attempt in range(attempts):
         try:
             response = await client.get(url, params=params)
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt == attempts - 1:
-                    response.raise_for_status()
-                retry_after = response.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after else min(8.0, 2**attempt)
-                await asyncio.sleep(delay)
-                continue
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise CollectorError(f"Expected JSON object from {url}")
-            return payload
-        except (httpx.HTTPError, ValueError, CollectorError) as exc:
+        except httpx.RequestError as exc:
             last_error = exc
             if attempt == attempts - 1:
                 break
             await asyncio.sleep(min(8.0, 2**attempt))
+            continue
+
+        if response.status_code == 429 or response.status_code >= 500:
+            if attempt < attempts - 1:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = (
+                        float(retry_after)
+                        if retry_after
+                        else min(8.0, 2**attempt)
+                    )
+                except (TypeError, ValueError):
+                    delay = min(8.0, 2**attempt)
+                await asyncio.sleep(delay)
+                continue
+
+        if response.is_error:
+            detail = " ".join(response.text.strip().split())[:500] or None
+            raise CollectorHTTPError(
+                str(response.request.url), response.status_code, detail
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                break
+            await asyncio.sleep(min(8.0, 2**attempt))
+            continue
+
+        if not isinstance(payload, dict):
+            last_error = CollectorError(f"Expected JSON object from {url}")
+            if attempt == attempts - 1:
+                break
+            await asyncio.sleep(min(8.0, 2**attempt))
+            continue
+        return payload
+
+    if isinstance(last_error, httpx.RequestError):
+        raise CollectorTransportError(f"Request failed for {url}: {last_error}")
     raise CollectorError(f"Request failed for {url}: {last_error}")
 
 
@@ -142,39 +188,116 @@ class KalshiCollector(MarketCollector):
             raw=item,
         )
 
+    @staticmethod
+    def _base_urls(settings: Settings) -> list[str]:
+        """Return the official Kalshi hosts in priority order without duplicates."""
+        values = [settings.kalshi_base_url, settings.kalshi_fallback_base_url]
+        return list(dict.fromkeys(value.rstrip("/") for value in values if value))
+
     async def fetch(
         self, client: httpx.AsyncClient, settings: Settings
     ) -> SourceFetchResult:
         records: dict[str, MarketRecord] = {}
         pages = 0
-        endpoint = f"{settings.kalshi_base_url}/markets"
+        configured_base_urls = self._base_urls(settings)
+        working_base_url = getattr(self, "_working_base_url", None)
+        base_urls = list(
+            dict.fromkeys(
+                value
+                for value in (working_base_url, *configured_base_urls)
+                if value
+            )
+        )
+        active_base_index = 0
+
+        async def fetch_page(params: dict[str, Any]) -> dict[str, Any]:
+            """Fetch one page and fail over to Kalshi's supported shared host."""
+            nonlocal active_base_index
+            last_error: CollectorError | None = None
+
+            for index in range(active_base_index, len(base_urls)):
+                base_url = base_urls[index]
+                endpoint = f"{base_url}/markets"
+                try:
+                    payload = await get_json(client, endpoint, params=params)
+                    if index != active_base_index:
+                        logger.warning(
+                            "Kalshi collector switched to supported fallback host %s",
+                            base_url,
+                        )
+                    active_base_index = index
+                    self._working_base_url = base_url
+                    return payload
+                except CollectorHTTPError as exc:
+                    last_error = exc
+                    can_fallback = index + 1 < len(base_urls)
+                    if can_fallback and exc.status_code in {403, 404}:
+                        logger.warning(
+                            "Kalshi host %s returned HTTP %s; trying %s",
+                            base_url,
+                            exc.status_code,
+                            base_urls[index + 1],
+                        )
+                        continue
+                    raise
+                except CollectorTransportError as exc:
+                    last_error = exc
+                    if index + 1 < len(base_urls):
+                        logger.warning(
+                            "Kalshi host %s was unreachable; trying %s",
+                            base_url,
+                            base_urls[index + 1],
+                        )
+                        continue
+                    raise
+
+            raise last_error or CollectorError("No Kalshi API host is configured")
+
         try:
+            if not base_urls:
+                raise CollectorError("No Kalshi API host is configured")
+
             # Open and unopened are fetched separately because Kalshi supports one
             # status filter per request. Unopened contracts matter for early alerts.
             for status in ("open", "unopened"):
                 cursor: str | None = None
                 while pages < settings.max_pages_per_source:
-                    params: dict[str, Any] = {"status": status, "limit": 1000}
+                    params: dict[str, Any] = {
+                        "status": status,
+                        "limit": settings.kalshi_page_size,
+                    }
+                    if settings.kalshi_exclude_multivariate:
+                        # Combination markets add substantial noise and volume but
+                        # rarely help company-risk monitoring.
+                        params["mve_filter"] = "exclude"
                     if cursor:
                         params["cursor"] = cursor
-                    payload = await get_json(client, endpoint, params=params)
+
+                    payload = await fetch_page(params)
                     pages += 1
                     items = payload.get("markets", [])
                     if not isinstance(items, list):
-                        raise CollectorError("Kalshi response field 'markets' was not a list")
+                        raise CollectorError(
+                            "Kalshi response field 'markets' was not a list"
+                        )
                     for item in items:
                         if not isinstance(item, dict):
                             continue
                         parsed = self.parse_market(item)
                         if parsed:
                             records[parsed.external_id] = parsed
+
                     next_cursor = payload.get("cursor")
                     if not next_cursor or next_cursor == cursor:
                         break
                     cursor = str(next_cursor)
+                    if settings.kalshi_page_delay_seconds > 0:
+                        await asyncio.sleep(settings.kalshi_page_delay_seconds)
+
                 if pages >= settings.max_pages_per_source:
                     logger.warning("Kalshi scan reached the configured page limit")
                     break
+
             return SourceFetchResult(self.name, list(records.values()), pages)
         except Exception as exc:  # collector boundary: preserve other sources
             logger.exception("Kalshi collection failed")

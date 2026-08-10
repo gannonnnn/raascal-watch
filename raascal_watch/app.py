@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from . import __version__
 from .db import Database
 from .scanner import Scanner, ScannerBusyError
 from .settings import get_settings
@@ -92,7 +93,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="RaaScal Watch",
-    version="0.2.0",
+    version=__version__,
     description="External incentive intelligence for public prediction markets.",
     lifespan=lifespan,
 )

@@ -13,3 +13,16 @@ def test_legacy_rw_environment_prefix_is_supported(monkeypatch) -> None:
 
     assert settings.run_scan_on_startup is False
     assert settings.max_pages_per_source == 5
+
+
+def test_kalshi_supported_fallback_host_is_configured(monkeypatch) -> None:
+    monkeypatch.delenv("RAASCAL_KALSHI_FALLBACK_BASE_URL", raising=False)
+    monkeypatch.delenv("RW_KALSHI_FALLBACK_BASE_URL", raising=False)
+
+    settings = get_settings()
+
+    assert settings.kalshi_fallback_base_url == (
+        "https://api.elections.kalshi.com/trade-api/v2"
+    )
+    assert settings.kalshi_page_size == 1000
+    assert settings.kalshi_exclude_multivariate is True

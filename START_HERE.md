@@ -30,3 +30,7 @@ raascal-watch serve
 4. Add Slack, generic webhook, or SMTP settings to `.env` when ready for external notifications.
 
 The first successful live scan of each source is intentionally silent. It establishes a baseline so already-existing contracts do not create an initial alert flood.
+
+## Kalshi source note
+
+RaaScal Watch first uses Kalshi's documented `external-api` production host. If that host returns HTTP 403 or cannot be reached, version 0.2.1 automatically retries through Kalshi's officially supported `api.elections` compatibility host. Despite the hostname, it returns all Kalshi market categories.

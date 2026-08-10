@@ -76,6 +76,10 @@ class Settings:
     enable_kalshi: bool
     enable_polymarket: bool
     kalshi_base_url: str
+    kalshi_fallback_base_url: str | None
+    kalshi_page_size: int
+    kalshi_page_delay_seconds: float
+    kalshi_exclude_multivariate: bool
     polymarket_base_url: str
     generic_webhook_url: str | None
     slack_webhook_url: str | None
@@ -113,6 +117,20 @@ def get_settings() -> Settings:
             _env("RAASCAL_KALSHI_BASE_URL")
             or "https://external-api.kalshi.com/trade-api/v2"
         ).rstrip("/"),
+        kalshi_fallback_base_url=(
+            (
+                _env("RAASCAL_KALSHI_FALLBACK_BASE_URL")
+                or "https://api.elections.kalshi.com/trade-api/v2"
+            ).rstrip("/")
+            or None
+        ),
+        kalshi_page_size=min(1000, _int("RAASCAL_KALSHI_PAGE_SIZE", 1000)),
+        kalshi_page_delay_seconds=_float(
+            "RAASCAL_KALSHI_PAGE_DELAY_SECONDS", 0.15, minimum=0.0
+        ),
+        kalshi_exclude_multivariate=_bool(
+            "RAASCAL_KALSHI_EXCLUDE_MULTIVARIATE", True
+        ),
         polymarket_base_url=(
             _env("RAASCAL_POLYMARKET_BASE_URL")
             or "https://gamma-api.polymarket.com"
