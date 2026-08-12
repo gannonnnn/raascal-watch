@@ -2,13 +2,21 @@
 
 ## Easiest method on a Mac
 
-Double-click `start-demo.command`.
+Run `start-raascal-watch.command`.
 
-The first launch creates a private Python environment, installs the project, loads the offline demonstration data, starts the dashboard, and opens:
+The first launch creates a private Python environment, installs the project, removes any synthetic records left by older versions, starts the dashboard, and opens:
 
 `http://127.0.0.1:8000`
 
-If macOS blocks the file, Control-click it, choose **Open**, and confirm. Keep the Terminal window open while using the dashboard. Press **Control-C** in that window to stop the service.
+If macOS blocks the file, use Terminal:
+
+```bash
+bash "/path/to/raascal-watch/start-raascal-watch.command"
+```
+
+Keep the Terminal window open while using the dashboard. Press **Control-C** in that window to stop the service.
+
+The old `start-demo.command` filename still works for compatibility, but normal startup no longer loads synthetic demo data.
 
 ## Manual setup
 
@@ -18,19 +26,52 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-raascal-watch seed-demo
+raascal-watch validate-config
+raascal-watch purge-demo
 raascal-watch serve
 ```
 
-## Switch from demo data to live public listings
+## Active queue and archive
 
-1. Edit `config/watchlist.yaml` with the company, products, executives, and metrics to monitor.
-2. Run `raascal-watch validate-config`.
-3. Run `raascal-watch scan`, or leave `raascal-watch serve` running for scheduled scans.
-4. Add Slack, generic webhook, or SMTP settings to `.env` when ready for external notifications.
+The default page shows only active contracts. Closed or expired contracts are retained under the separate **Archive** tab and have no review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
 
-The first successful live scan of each source is intentionally silent. It establishes a baseline so already-existing contracts do not create an initial alert flood.
+## Contract-specific review guidance
+
+Open **Review this active contract** on a current result to see the likely organization role, why it surfaced, questions to answer, suggested owners, and first review steps tailored to that contract's title, rules, source, probability, volume, and close time.
+
+To regenerate this guidance for records already in the local database without another API scan:
+
+```bash
+raascal-watch refresh-guidance
+```
+
+## Live-only behavior
+
+- Dashboard totals and results exclude synthetic `demo` records by default.
+- The standard launcher permanently removes old demo records from the local database.
+- Kalshi and Polymarket history is preserved.
+- The first successful live scan of each source remains a silent baseline.
+
+## Explicit developer demo
+
+```bash
+raascal-watch seed-demo
+```
+
+Then open:
+
+`http://127.0.0.1:8000/?source=demo&include_demo=true`
 
 ## Kalshi source note
 
-RaaScal Watch first uses Kalshi's documented `external-api` production host. If that host returns HTTP 403 or cannot be reached, version 0.2.1 automatically retries through Kalshi's officially supported `api.elections` compatibility host. Despite the hostname, it returns all Kalshi market categories.
+RaaScal Watch first uses Kalshi's documented `external-api` production host. If that host returns HTTP 403/404 or cannot be reached, it automatically retries through Kalshi's supported `api.elections` compatibility host.
+
+## Refreshing existing contract guidance
+
+The updater refreshes stored matches automatically after it copies the new code. To run it manually:
+
+```bash
+raascal-watch refresh-guidance
+```
+
+This updates the role, review questions, and contract-specific next steps without deleting live history or requiring another API pull.

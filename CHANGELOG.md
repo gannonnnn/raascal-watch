@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.0 — Active review queue and lifecycle-aware UI
+
+- Made the standard review queue active-only using both source status and closing time.
+- Added a separate Archive view for closed, inactive, settled, finalized, cancelled, and expired contracts.
+- Removed review and acknowledgement controls from historical records.
+- Changed dashboard summary counts and filter options to reflect the selected active/archive lifecycle view.
+- Added one contract card per exact market and combined multi-organization matches on that card.
+- Grouped related dates, thresholds, and outcomes beneath collapsible source-event series.
+- Cleaned repetitive Polymarket titles while preserving broader event context for matching and grouping.
+- Removed the unreliable Apply button and added automatic filter submission, active-filter chips, and clear-filter navigation.
+- Added sorting by priority, closing time, cumulative volume, and newest match.
+- Added contract-level review acknowledgement and blocked archived contracts from acknowledgement APIs.
+- Changed CLI exports to active-only by default, with explicit `--view archive` and `--view all` options.
+- Added automated coverage for lifecycle filtering, archived-record preservation, grouping, title cleanup, multi-organization cards, sorting, and the new filter UI.
+
+## 0.3.1 — Contract-specific review guidance
+
+- Replaced the generic “Review rationale and playbook” dropdown with **Review this specific contract**.
+- Added role inference for named subjects, platform/metric owners, resolution-data sources/oracles, direct controllers, availability targets, reporting/KPI owners, benchmark participants, and decision owners.
+- Added contract-specific review questions and next steps generated from the actual title, rules, source, probability, cumulative volume, open interest, close time, matched metrics, and organization profile.
+- Added clear economic-context language distinguishing cumulative volume from a trader's potential payout.
+- Added database migration support for role and review-question fields while preserving existing live history, baselines, alert states, and acknowledgements.
+- Added `raascal-watch refresh-guidance` to update existing live matches locally without another API scan.
+- Included the new fields in dashboard APIs, CSV/JSON exports, email/console alerts, Slack, and generic webhook payloads.
+- Added automated coverage for FlightAware oracle guidance, YouTube platform guidance, MrBeast/OpenAI advance-knowledge guidance, database migration, persistence, and local guidance refresh.
+
+## 0.3.0 — Live-only monitoring and new topical profiles
+
+- Removed automatic synthetic demo seeding from normal startup.
+- Added `raascal-watch purge-demo` and automatic cleanup of demo records while preserving all live Kalshi and Polymarket history.
+- Dashboard totals, filters, recent scans, APIs, and exports now exclude demo records by default.
+- Added a new `start-raascal-watch.command` launcher; the older `start-demo.command` remains as a compatibility wrapper.
+- Added enabled profiles for **FlightAware** and **OpenAI / ChatGPT**.
+- Added `oracle_and_data_dependency` scoring for contracts that depend on a company's data, public counter, status page, or named settlement source.
+- Added `benchmark_and_evaluation_integrity` scoring for AI leaderboards, arena scores, benchmarks, and model rankings.
+- Clarified dashboard labels as live public-market records and live candidate matches.
+- Added tests for live-only queries, demo purging, FlightAware settlement-source matching, OpenAI release/outage matching, and AI benchmark integrity.
+
 ## 0.2.1 — Kalshi source reliability
 
 - Added automatic fallback from Kalshi's recommended `external-api` host to

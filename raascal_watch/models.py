@@ -67,7 +67,9 @@ class MatchResult:
     categories: list[str]
     risk_score: int
     severity: str
+    roles: list[str]
     reasons: list[str]
+    review_questions: list[str]
     stakeholders: list[str]
     actions: list[str]
 

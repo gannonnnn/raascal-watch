@@ -363,6 +363,9 @@ class PolymarketCollector(MarketCollector):
                 continue
 
             question = str(market.get("question") or market.get("title") or "").strip()
+            # Keep event context in the stored searchable title so organization
+            # references in a broad event name are not lost. The dashboard uses
+            # raw market metadata to display only the specific tradable question.
             if event_title and question and event_title.lower() != question.lower():
                 title = f"{event_title} — {question}"
             else:

@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 # RaaScal Watch begins with an identity match, then evaluates the surrounding
 # contract for monitored metrics and explainable risk categories. A match is a
@@ -74,6 +74,49 @@ organizations:
       - Correlate market creation, odds movement, and settlement timing with service telemetry, DDoS signals, vulnerability reports, and threat-intelligence activity.
       - Preserve a snapshot of the contract and relevant security or availability logs without treating the market itself as proof of an attack.
       - Escalate unusual market activity near settlement to Security Operations and Site Reliability Engineering for a time-bound review.
+
+  - name: FlightAware
+    enabled: true
+    aliases:
+      - FlightAware
+      - FlightAware LLC
+    products:
+      - FlightAware AeroAPI
+      - AeroAPI
+      - FlightAware Firehose
+      - FlightAware Foresight
+      - FlightAware Global
+      - FlightAware MiseryMap
+    executives: []
+    metrics:
+      - flight cancellation
+      - flight cancellations
+      - cancellation count
+      - cancelled flights
+      - canceled flights
+      - cancellation rate
+      - delayed flights
+      - flight delays
+      - diverted flights
+      - airport closure
+      - airport closures
+      - scheduled flights
+      - flight status
+      - on-time performance
+      - total cancellations
+      - outcome verified from FlightAware
+    stakeholders:
+      - Legal
+      - Data Licensing
+      - Data Partnerships
+      - Brand Protection
+      - Product Integrity
+      - Aviation Operations
+    playbook:
+      - Preserve the market rules and determine whether FlightAware is named as a primary, fallback, or verification source.
+      - Confirm whether use of FlightAware data, APIs, links, names, or trademarks is authorized under applicable licenses and terms.
+      - Assess whether the contract creates incentives to disrupt flights, airports, carrier operations, or data availability.
+      - Review unusual scraping or API traffic around settlement without treating the market itself as evidence of abuse.
 
   - name: YouTube
     enabled: true
@@ -153,6 +196,56 @@ organizations:
       - Identify employees, production partners, agencies, sponsors, or vendors with advance access to scripts, upload timing, titles, or release plans.
       - Distinguish outcomes the creator can directly control from outcomes requiring coordinated audience or platform manipulation.
       - Review unusual engagement separately from paid promotion and preserve the relevant production and analytics timeline.
+
+  - name: OpenAI / ChatGPT
+    enabled: true
+    aliases:
+      - OpenAI
+      - ChatGPT
+    products:
+      - GPT-6
+      - GPT-5.6
+      - ChatGPT Plus
+      - ChatGPT Pro
+      - OpenAI API
+      - OpenAI Sora
+      - DALL-E
+    executives: []
+    metrics:
+      - release date
+      - launch date
+      - model release
+      - frontier model
+      - outage
+      - outage days
+      - downtime
+      - status page
+      - benchmark
+      - leaderboard
+      - arena score
+      - model ranking
+      - best AI model
+      - top AI model
+      - subscription price
+      - ChatGPT price
+      - API price
+      - token price
+      - app store ranking
+      - valuation
+      - IPO
+    stakeholders:
+      - Insider Risk
+      - Legal & Compliance
+      - Product Security
+      - Site Reliability Engineering
+      - AI Evaluation
+      - Communications
+      - Finance
+    playbook:
+      - Classify the contract as a direct-control or advance-knowledge event, an availability event, an external benchmark, or a financial-reporting outcome.
+      - Identify employees, contractors, evaluation partners, cloud providers, and launch partners with advance access to the relevant answer.
+      - Compare market creation and odds movement with deployment, status, benchmark, pricing, and announcement timelines.
+      - Preserve the contract and supporting telemetry without treating a prediction or position as evidence of misconduct.
 
   # Copy this block and set enabled: true for a client or another research profile.
   - name: Example Company
@@ -248,13 +341,66 @@ risk_categories:
       - data breach
       - DNS outage
       - status page
+      - airport closure
+      - airport closures
+      - flight cancellation
+      - flight cancellations
     stakeholders:
       - Security Operations
       - Site Reliability Engineering
       - Incident Response
       - Threat Intelligence
     actions:
-      - Compare market timing and movement with availability telemetry, security alerts, vulnerability disclosures, and incident-response activity.
+      - Compare market timing and movement with availability telemetry, security alerts, operational disruptions, vulnerability disclosures, and incident-response activity.
+
+  oracle_and_data_dependency:
+    weight: 22
+    terms:
+      - outcome verified from
+      - verified from
+      - primary source agency
+      - resolution source
+      - source agency
+      - data source
+      - official data
+      - official dashboard
+      - public counter
+      - public view count
+      - public subscriber count
+      - Cloudflare Radar
+      - status page
+    stakeholders:
+      - Legal
+      - Data Governance
+      - Data Licensing
+      - Data Partnerships
+      - Brand Protection
+    actions:
+      - Preserve the exact settlement language and identify the organization whose data, counter, status page, or trademark determines the payout.
+      - Confirm whether the data and brand use is authorized and whether reliance creates operational, contractual, reputational, or safety exposure.
+
+  benchmark_and_evaluation_integrity:
+    weight: 22
+    terms:
+      - benchmark
+      - leaderboard
+      - arena score
+      - LM Arena
+      - LMArena
+      - best AI model
+      - top AI model
+      - coding arena
+      - text arena
+      - model ranking
+      - evaluation score
+      - eval score
+    stakeholders:
+      - AI Evaluation
+      - Model Integrity
+      - Product Security
+      - Research Operations
+    actions:
+      - Compare the market's resolution benchmark with controlled evaluations and review whether submissions, voting, contamination, or disclosure timing could affect the result.
 
   direct_control_and_advance_knowledge:
     weight: 22
@@ -273,6 +419,10 @@ risk_categories:
       - prepared remarks
       - announcement timing
       - episode release
+      - release date
+      - launch date
+      - model release
+      - frontier model
     stakeholders:
       - Legal
       - Compliance
@@ -300,12 +450,14 @@ risk_categories:
       - release
       - feature
       - featured
+      - price increase
+      - increase the cost
     stakeholders:
       - Legal
       - Communications
       - Trust & Safety
     actions:
-      - Check whether reports, complaints, policy-enforcement queues, publication timing, or launch decisions could be gamed before settlement.
+      - Check whether reports, complaints, policy-enforcement queues, publication timing, pricing, or launch decisions could be gamed before settlement.
 
   user_growth:
     weight: 18
@@ -339,6 +491,10 @@ risk_categories:
       - valuation
       - market share
       - earnings
+      - IPO
+      - subscription price
+      - API price
+      - token price
     stakeholders:
       - Finance
       - Legal
@@ -368,6 +524,8 @@ risk_categories:
       - astroturf
       - DDoS
       - denial of service
+      - disrupt flights
+      - cause cancellations
     stakeholders:
       - Fraud
       - Security

@@ -13,6 +13,7 @@ import uvicorn
 
 from .db import Database
 from .models import MarketRecord
+from .risk import RiskEngine
 from .scanner import Scanner
 from .settings import PROJECT_ROOT, get_settings
 from .text import parse_datetime
@@ -71,9 +72,68 @@ def command_seed_demo(args: argparse.Namespace) -> int:
     records = _load_demo_records(Path(args.fixture).resolve())
     summary = asyncio.run(scanner.scan_records("demo", records, notify=args.notify))
     _print_json(asdict(summary))
-    print("\nDemo data is available in the dashboard.")
+    print(
+        "\nSynthetic demo data was loaded for developer testing. "
+        "The standard dashboard hides it; open "
+        "http://127.0.0.1:8000/?source=demo&include_demo=true to view it."
+    )
     return 0
 
+
+def command_purge_demo(_: argparse.Namespace) -> int:
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    removed = database.delete_source("demo")
+    print(
+        "Removed synthetic demo data: "
+        f"{removed['markets']} market record(s), "
+        f"{removed['matches']} match(es), and "
+        f"{removed['scan_runs']} scan run(s)."
+    )
+    return 0
+
+
+def command_refresh_guidance(_: argparse.Namespace) -> int:
+    """Regenerate role-aware review briefs from records already in SQLite."""
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    engine = RiskEngine(load_watchlist(settings.watchlist_path))
+
+    markets = database.list_matched_markets(include_demo=False)
+    refreshed = 0
+    skipped = 0
+    for market_id, market, existing_organizations in markets:
+        current = {result.organization: result for result in engine.match(market)}
+        for organization in existing_organizations:
+            result = current.get(organization)
+            if result is None:
+                skipped += 1
+                continue
+            if database.update_match_analysis(market_id, result):
+                refreshed += 1
+
+    print(
+        f"Refreshed contract-specific guidance for {refreshed} existing match(es). "
+        f"Skipped {skipped} stale match(es) that no longer fit the current watchlist."
+    )
+    return 0
+
+
+
+def command_lifecycle_summary(_: argparse.Namespace) -> int:
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    active = database.dashboard_stats(include_demo=False, view="active")
+    archive = database.dashboard_stats(include_demo=False, view="archive")
+    print(
+        "Contract lifecycle: "
+        f"{active['matches']} active candidate contract(s); "
+        f"{archive['matches']} archived candidate contract(s)."
+    )
+    return 0
 
 def command_serve(args: argparse.Namespace) -> int:
     uvicorn.run(
@@ -114,7 +174,9 @@ def command_export(args: argparse.Namespace) -> int:
     settings = get_settings()
     database = Database(settings.db_path)
     database.initialize()
-    rows = database.list_matches(limit=1000)
+    rows = database.list_matches(
+        limit=1000, include_demo=args.include_demo, view=args.view
+    )
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     if args.format == "json":
@@ -136,6 +198,8 @@ def command_export(args: argparse.Namespace) -> int:
             "matched_identity_terms",
             "matched_metric_terms",
             "categories",
+            "roles",
+            "review_questions",
             "stakeholders",
             "reasons",
             "actions",
@@ -178,7 +242,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(func=command_serve)
 
-    demo = subparsers.add_parser("seed-demo", help="Load offline demo contracts")
+    demo = subparsers.add_parser(
+        "seed-demo",
+        help="Load synthetic contracts for explicit developer testing",
+    )
     demo.add_argument(
         "--fixture",
         default=str(PROJECT_ROOT / "fixtures" / "demo_markets.json"),
@@ -189,6 +256,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Send configured notifications for the demo records",
     )
     demo.set_defaults(func=command_seed_demo)
+
+    purge_demo = subparsers.add_parser(
+        "purge-demo",
+        help="Remove all synthetic demo records without touching live history",
+    )
+    purge_demo.set_defaults(func=command_purge_demo)
+
+    refresh_guidance = subparsers.add_parser(
+        "refresh-guidance",
+        help="Regenerate contract-specific review guidance from existing live records",
+    )
+    refresh_guidance.set_defaults(func=command_refresh_guidance)
+
+    lifecycle = subparsers.add_parser(
+        "lifecycle-summary",
+        help="Show active and archived candidate-contract counts",
+    )
+    lifecycle.set_defaults(func=command_lifecycle_summary)
 
     validate = subparsers.add_parser("validate-config", help="Validate the YAML watchlist")
     validate.set_defaults(func=command_validate)
@@ -203,6 +288,17 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export", help="Export dashboard matches")
     export.add_argument("--format", choices=["csv", "json"], default="csv")
     export.add_argument("--output", required=True)
+    export.add_argument(
+        "--view",
+        choices=["active", "archive", "all"],
+        default="active",
+        help="Export active contracts by default; archive/all must be requested explicitly",
+    )
+    export.add_argument(
+        "--include-demo",
+        action="store_true",
+        help="Include explicitly seeded synthetic demo matches",
+    )
     export.set_defaults(func=command_export)
     return parser
 

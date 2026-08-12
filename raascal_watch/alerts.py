@@ -59,7 +59,9 @@ def build_payload(market: MarketRecord, match: MatchResult) -> dict[str, Any]:
         "matched_identity_terms": match.matched_identity_terms,
         "matched_metric_terms": match.matched_metric_terms,
         "risk_categories": match.categories,
+        "likely_organization_roles": match.roles,
         "reasons": match.reasons,
+        "review_questions": match.review_questions,
         "recommended_stakeholders": match.stakeholders,
         "recommended_actions": match.actions,
         "market": {
@@ -81,7 +83,9 @@ def build_payload(market: MarketRecord, match: MatchResult) -> dict[str, Any]:
 
 
 def build_plain_text(market: MarketRecord, match: MatchResult) -> str:
+    roles = ", ".join(match.roles) or "Referenced organization"
     reasons = "\n".join(f"- {item}" for item in match.reasons)
+    questions = "\n".join(f"- {item}" for item in match.review_questions)
     actions = "\n".join(f"- {item}" for item in match.actions[:8])
     stakeholders = ", ".join(match.stakeholders) or "Risk"
     return f"""RaaScal Watch alert: {match.organization}
@@ -94,12 +98,17 @@ Volume: {_money(market.volume)}
 Closes: {_when(market.closes_at)}
 Link: {market.url or 'not available'}
 
+Likely organization role(s): {roles}
+
 Why it matched:
 {reasons}
 
+Questions to answer:
+{questions}
+
 Suggested owners: {stakeholders}
 
-Suggested actions:
+Contract-specific review steps:
 {actions}
 
 This alert is an external risk signal, not proof of manipulation or abuse.
@@ -151,7 +160,11 @@ class AlertDispatcher:
     ) -> NotificationOutcome:
         assert self.settings.slack_webhook_url
         title = _slack_escape(market.title)
-        reason_lines = "\n".join(f"• {_slack_escape(item)}" for item in match.reasons[:5])
+        role_line = ", ".join(match.roles) or "Referenced organization"
+        reason_lines = "\n".join(f"• {_slack_escape(item)}" for item in match.reasons[:4])
+        question_lines = "\n".join(
+            f"• {_slack_escape(item)}" for item in match.review_questions[:3]
+        )
         payload = {
             "text": f"RaaScal Watch: {match.organization} referenced on {market.source}",
             "blocks": [
@@ -176,7 +189,20 @@ class AlertDispatcher:
                 },
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*Why it matched*\n{reason_lines}"},
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*Likely organization role*\n{_slack_escape(role_line)}\n\n"
+                            f"*Why it surfaced*\n{reason_lines}"
+                        ),
+                    },
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Questions to answer*\n{question_lines}",
+                    },
                 },
                 {
                     "type": "context",

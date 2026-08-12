@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -32,6 +33,9 @@ database = Database(settings.db_path)
 scanner = Scanner(settings, database)
 PACKAGE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+
+_ALLOWED_VIEWS = {"active", "archive"}
+_ALLOWED_SORTS = {"priority", "closing", "volume", "newest"}
 
 
 def _format_date(value: str | None) -> str:
@@ -61,6 +65,27 @@ def _format_probability(value: float | None) -> str:
 templates.env.filters["date"] = _format_date
 templates.env.filters["money"] = _format_money
 templates.env.filters["probability"] = _format_probability
+
+
+def _normalize_view(value: str | None) -> str:
+    clean = (value or "active").strip().lower()
+    return clean if clean in _ALLOWED_VIEWS else "active"
+
+
+def _normalize_sort(value: str | None) -> str:
+    clean = (value or "priority").strip().lower()
+    return clean if clean in _ALLOWED_SORTS else "priority"
+
+
+def _dashboard_url(request: Request, **changes: str | None) -> str:
+    params = dict(request.query_params)
+    for key, value in changes.items():
+        if value in (None, ""):
+            params.pop(key, None)
+        else:
+            params[key] = str(value)
+    query = urlencode(params)
+    return f"/?{query}" if query else "/"
 
 
 async def _scheduled_scans() -> None:
@@ -107,16 +132,28 @@ async def dashboard(
     severity: str | None = Query(default=None),
     source: str | None = Query(default=None),
     alert_state: str | None = Query(default=None),
+    sort: str = Query(default="priority"),
+    view: str = Query(default="active"),
+    include_demo: bool = Query(default=False),
 ) -> HTMLResponse:
     database.initialize()
-    stats = database.dashboard_stats()
-    matches = database.list_matches(
+    normalized_view = _normalize_view(view)
+    normalized_sort = _normalize_sort(sort)
+
+    # Normal review is active-only. Historical contracts remain available in an
+    # explicit archive but cannot be acknowledged or reviewed as current work.
+    stats = database.dashboard_stats(include_demo=include_demo, view=normalized_view)
+    result = database.list_contract_groups(
         organization=organization,
         severity=severity,
         source=source,
         alert_state=alert_state,
+        include_demo=include_demo,
+        view=normalized_view,
+        sort=normalized_sort,
     )
-    scans = database.recent_scans(12)
+    scans = database.recent_scans(12, include_demo=include_demo)
+
     try:
         watchlist = load_watchlist(settings.watchlist_path)
         watched_organizations = [item.name for item in watchlist.organizations]
@@ -124,12 +161,50 @@ async def dashboard(
     except WatchlistError as exc:
         watched_organizations = []
         config_error = str(exc)
+
+    filter_values = {
+        "organization": organization or "",
+        "severity": severity or "",
+        "source": source or "",
+        "alert_state": alert_state or "",
+        "sort": normalized_sort,
+    }
+    chip_labels = {
+        "organization": "Organization",
+        "severity": "Severity",
+        "source": "Source",
+        "alert_state": "State",
+    }
+    active_filter_chips = [
+        {
+            "key": key,
+            "label": label,
+            "value": filter_values[key].replace("_", " ").title()
+            if key != "organization"
+            else filter_values[key],
+            "clear_url": _dashboard_url(request, **{key: None}),
+        }
+        for key, label in chip_labels.items()
+        if filter_values[key]
+    ]
+
+    clear_params: dict[str, str | None] = {
+        "organization": None,
+        "severity": None,
+        "source": None,
+        "alert_state": None,
+        "sort": None,
+        "view": normalized_view,
+    }
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "stats": stats,
-            "matches": matches,
+            "contract_groups": result["groups"],
+            "displayed_contract_count": len(result["contracts"]),
+            "filtered_contract_count": result["total"],
             "scans": scans,
             "scanner_running": scanner.is_running,
             "watched_organizations": watched_organizations,
@@ -147,12 +222,13 @@ async def dashboard(
             ),
             "poll_interval": settings.poll_interval_minutes,
             "config_error": config_error,
-            "filters": {
-                "organization": organization or "",
-                "severity": severity or "",
-                "source": source or "",
-                "alert_state": alert_state or "",
-            },
+            "include_demo": include_demo,
+            "view": normalized_view,
+            "filters": filter_values,
+            "active_filter_chips": active_filter_chips,
+            "active_url": _dashboard_url(request, view="active", alert_state=None),
+            "archive_url": _dashboard_url(request, view="archive", alert_state=None),
+            "clear_url": _dashboard_url(request, **clear_params),
         },
     )
 
@@ -163,6 +239,8 @@ async def api_matches(
     severity: str | None = None,
     source: str | None = None,
     alert_state: str | None = None,
+    view: str = "active",
+    include_demo: bool = False,
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> list[dict[str, Any]]:
     return database.list_matches(
@@ -170,6 +248,31 @@ async def api_matches(
         severity=severity,
         source=source,
         alert_state=alert_state,
+        view=_normalize_view(view),
+        include_demo=include_demo,
+        limit=limit,
+    )
+
+
+@app.get("/api/contracts")
+async def api_contracts(
+    organization: str | None = None,
+    severity: str | None = None,
+    source: str | None = None,
+    alert_state: str | None = None,
+    sort: str = "priority",
+    view: str = "active",
+    include_demo: bool = False,
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> dict[str, Any]:
+    return database.list_contract_groups(
+        organization=organization,
+        severity=severity,
+        source=source,
+        alert_state=alert_state,
+        sort=_normalize_sort(sort),
+        view=_normalize_view(view),
+        include_demo=include_demo,
         limit=limit,
     )
 
@@ -187,18 +290,43 @@ async def api_scan() -> JSONResponse:
 
 @app.post("/api/matches/{match_id}/acknowledge")
 async def acknowledge(match_id: int) -> dict[str, Any]:
+    # Retained for API compatibility. Historical records are deliberately not
+    # reviewable through either the dashboard or the older row-level endpoint.
+    match = database.get_match(match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    if not database.market_is_active(int(match["market_id"])):
+        raise HTTPException(
+            status_code=409,
+            detail="Archived contracts cannot be marked as current review work.",
+        )
     if not database.acknowledge_match(match_id, utcnow()):
         raise HTTPException(status_code=404, detail="Match not found")
     return {"ok": True, "match_id": match_id}
 
 
+@app.post("/api/contracts/{market_id}/acknowledge")
+async def acknowledge_contract(market_id: int) -> dict[str, Any]:
+    changed = database.acknowledge_market(market_id, utcnow())
+    if not changed:
+        if not database.market_is_active(market_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Archived contracts cannot be marked as current review work.",
+            )
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return {"ok": True, "market_id": market_id, "matches_updated": changed}
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    stats = database.dashboard_stats()
+    stats = database.dashboard_stats(include_demo=False, view="active")
     return {
         "status": "ok",
         "scanner_running": scanner.is_running,
         "last_scan": stats["last_scan"],
+        "active_candidate_contracts": stats["matches"],
+        "archived_candidate_contracts": stats["archive_matches"],
         "enabled_sources": [collector.name for collector in scanner.collectors],
         "database": str(settings.db_path),
     }
