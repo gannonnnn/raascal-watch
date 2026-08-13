@@ -10,6 +10,7 @@ import httpx
 
 from .models import MarketRecord, SourceFetchResult
 from .settings import Settings
+from .watchlist import WatchlistError, load_watchlist
 from .text import (
     coerce_float,
     first_present,
@@ -194,6 +195,32 @@ class KalshiCollector(MarketCollector):
         values = [settings.kalshi_base_url, settings.kalshi_fallback_base_url]
         return list(dict.fromkeys(value.rstrip("/") for value in values if value))
 
+    @staticmethod
+    def _priority_series_tickers(settings: Settings) -> list[str]:
+        """Return configured Kalshi series families that deserve targeted pulls.
+
+        Broad market pagination can hit its safety cap before a niche contract
+        family is encountered. Dependency rules in the watchlist provide a
+        transparent, configuration-backed list of series to query directly.
+        """
+        if not settings.kalshi_priority_series_scan:
+            return []
+        try:
+            watchlist = load_watchlist(settings.watchlist_path)
+        except (FileNotFoundError, WatchlistError, OSError) as exc:
+            logger.warning("Kalshi priority-series discovery skipped: %s", exc)
+            return []
+
+        values: list[str] = []
+        for profile in watchlist.organizations:
+            for rule in profile.dependency_rules:
+                if rule.source and rule.source != "kalshi":
+                    continue
+                values.extend(rule.series_ticker_prefixes)
+        return list(
+            dict.fromkeys(value.strip().upper() for value in values if value.strip())
+        )
+
     async def fetch(
         self, client: httpx.AsyncClient, settings: Settings
     ) -> SourceFetchResult:
@@ -210,14 +237,16 @@ class KalshiCollector(MarketCollector):
         )
         active_base_index = 0
 
-        async def fetch_page(params: dict[str, Any]) -> dict[str, Any]:
-            """Fetch one page and fail over to Kalshi's supported shared host."""
+        async def fetch_endpoint(
+            path: str, params: dict[str, Any]
+        ) -> dict[str, Any]:
+            """Fetch a public Kalshi endpoint with supported-host failover."""
             nonlocal active_base_index
             last_error: CollectorError | None = None
 
             for index in range(active_base_index, len(base_urls)):
                 base_url = base_urls[index]
-                endpoint = f"{base_url}/markets"
+                endpoint = f"{base_url}/{path.lstrip('/')}"
                 try:
                     payload = await get_json(client, endpoint, params=params)
                     if index != active_base_index:
@@ -253,16 +282,111 @@ class KalshiCollector(MarketCollector):
 
             raise last_error or CollectorError("No Kalshi API host is configured")
 
+        async def fetch_page(params: dict[str, Any]) -> dict[str, Any]:
+            return await fetch_endpoint("markets", params)
+
         try:
             if not base_urls:
                 raise CollectorError("No Kalshi API host is configured")
 
+            series_metadata: dict[str, dict[str, Any]] = {}
+
+            def parse_payload(payload: dict[str, Any]) -> str | None:
+                items = payload.get("markets", [])
+                if not isinstance(items, list):
+                    raise CollectorError(
+                        "Kalshi response field 'markets' was not a list"
+                    )
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    parsed = self.parse_market(item)
+                    if parsed:
+                        series_ticker = str(item.get("series_ticker") or "").strip().upper()
+                        metadata = series_metadata.get(series_ticker)
+                        if metadata:
+                            # Preserve source-family evidence without injecting it
+                            # into searchable contract text. This keeps a linked or
+                            # verified dependency distinct from a direct name mention.
+                            parsed.raw = {**parsed.raw, "_raascal_series": metadata}
+                        records[parsed.external_id] = parsed
+                next_cursor = payload.get("cursor")
+                return str(next_cursor) if next_cursor else None
+
+            # Discover concrete series tickers matching configured family prefixes.
+            # This catches families whose actual series ticker adds an airport or
+            # geography suffix (for example a KXFLYCANC... airport series).
+            priority_prefixes = self._priority_series_tickers(settings)
+            priority_series = list(priority_prefixes)
+            if priority_prefixes:
+                try:
+                    series_payload = await fetch_endpoint(
+                        "series",
+                        {
+                            "category": "Transportation",
+                            "include_product_metadata": "true",
+                        },
+                    )
+                    pages += 1
+                    series_items = series_payload.get("series", [])
+                    if isinstance(series_items, list):
+                        for item in series_items:
+                            if not isinstance(item, dict):
+                                continue
+                            ticker = str(item.get("ticker") or "").strip().upper()
+                            if not ticker or not any(
+                                ticker.startswith(prefix)
+                                for prefix in priority_prefixes
+                            ):
+                                continue
+                            series_metadata[ticker] = item
+                            if ticker not in priority_series:
+                                priority_series.append(ticker)
+                except CollectorError as exc:
+                    logger.warning(
+                        "Kalshi priority-series discovery failed; continuing with configured series: %s",
+                        exc,
+                    )
+
+            # Query configured niche series first. This prevents a broad page cap
+            # from hiding a monitored contract family such as KXUSFLYCAN.
+            for series_ticker in priority_series:
+                for status in ("open", "unopened"):
+                    cursor: str | None = None
+                    series_pages = 0
+                    while series_pages < settings.kalshi_priority_series_page_limit:
+                        params: dict[str, Any] = {
+                            "status": status,
+                            "series_ticker": series_ticker,
+                            "limit": settings.kalshi_page_size,
+                        }
+                        if settings.kalshi_exclude_multivariate:
+                            params["mve_filter"] = "exclude"
+                        if cursor:
+                            params["cursor"] = cursor
+
+                        payload = await fetch_page(params)
+                        pages += 1
+                        series_pages += 1
+                        next_cursor = parse_payload(payload)
+                        if not next_cursor or next_cursor == cursor:
+                            break
+                        cursor = next_cursor
+                        if settings.kalshi_page_delay_seconds > 0:
+                            await asyncio.sleep(settings.kalshi_page_delay_seconds)
+                    if series_pages >= settings.kalshi_priority_series_page_limit and cursor:
+                        logger.warning(
+                            "Kalshi priority series %s reached its page limit",
+                            series_ticker,
+                        )
+
             # Open and unopened are fetched separately because Kalshi supports one
             # status filter per request. Unopened contracts matter for early alerts.
+            broad_pages = 0
             for status in ("open", "unopened"):
-                cursor: str | None = None
-                while pages < settings.max_pages_per_source:
-                    params: dict[str, Any] = {
+                cursor = None
+                while broad_pages < settings.max_pages_per_source:
+                    params = {
                         "status": status,
                         "limit": settings.kalshi_page_size,
                     }
@@ -275,26 +399,15 @@ class KalshiCollector(MarketCollector):
 
                     payload = await fetch_page(params)
                     pages += 1
-                    items = payload.get("markets", [])
-                    if not isinstance(items, list):
-                        raise CollectorError(
-                            "Kalshi response field 'markets' was not a list"
-                        )
-                    for item in items:
-                        if not isinstance(item, dict):
-                            continue
-                        parsed = self.parse_market(item)
-                        if parsed:
-                            records[parsed.external_id] = parsed
-
-                    next_cursor = payload.get("cursor")
+                    broad_pages += 1
+                    next_cursor = parse_payload(payload)
                     if not next_cursor or next_cursor == cursor:
                         break
-                    cursor = str(next_cursor)
+                    cursor = next_cursor
                     if settings.kalshi_page_delay_seconds > 0:
                         await asyncio.sleep(settings.kalshi_page_delay_seconds)
 
-                if pages >= settings.max_pages_per_source:
+                if broad_pages >= settings.max_pages_per_source:
                     logger.warning("Kalshi scan reached the configured page limit")
                     break
 

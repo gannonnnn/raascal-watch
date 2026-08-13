@@ -156,11 +156,29 @@ async def dashboard(
 
     try:
         watchlist = load_watchlist(settings.watchlist_path)
-        watched_organizations = [item.name for item in watchlist.organizations]
+        watched_profiles = [item.name for item in watchlist.organizations]
+        profile_types = {item.name: item.profile_type for item in watchlist.organizations}
         config_error = None
     except WatchlistError as exc:
-        watched_organizations = []
+        watched_profiles = []
+        profile_types = {}
         config_error = str(exc)
+
+    # Always show every enabled organization or monitored theme in the filter.
+    # Match-derived names are appended as a compatibility fallback for records
+    # created by an older or customized watchlist.
+    filter_profile_names = list(
+        dict.fromkeys([*watched_profiles, *stats.get("organizations", [])])
+    )
+    organization_counts = stats.get("organization_counts", {})
+    organization_filter_options = [
+        {
+            "name": name,
+            "count": int(organization_counts.get(name, 0)),
+            "profile_type": profile_types.get(name, "organization"),
+        }
+        for name in filter_profile_names
+    ]
 
     filter_values = {
         "organization": organization or "",
@@ -170,7 +188,7 @@ async def dashboard(
         "sort": normalized_sort,
     }
     chip_labels = {
-        "organization": "Organization",
+        "organization": "Profile",
         "severity": "Severity",
         "source": "Source",
         "alert_state": "State",
@@ -207,7 +225,12 @@ async def dashboard(
             "filtered_contract_count": result["total"],
             "scans": scans,
             "scanner_running": scanner.is_running,
-            "watched_organizations": watched_organizations,
+            "watched_organizations": watched_profiles,
+            "profile_types": profile_types,
+            "organization_filter_options": organization_filter_options,
+            "selected_profile_enabled": bool(
+                organization and organization in watched_profiles
+            ),
             "configured_channels": list(
                 channel
                 for channel, enabled in (

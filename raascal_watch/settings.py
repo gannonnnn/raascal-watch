@@ -80,6 +80,8 @@ class Settings:
     kalshi_page_size: int
     kalshi_page_delay_seconds: float
     kalshi_exclude_multivariate: bool
+    kalshi_priority_series_scan: bool
+    kalshi_priority_series_page_limit: int
     polymarket_base_url: str
     generic_webhook_url: str | None
     slack_webhook_url: str | None
@@ -130,6 +132,12 @@ def get_settings() -> Settings:
         ),
         kalshi_exclude_multivariate=_bool(
             "RAASCAL_KALSHI_EXCLUDE_MULTIVARIATE", True
+        ),
+        kalshi_priority_series_scan=_bool(
+            "RAASCAL_KALSHI_PRIORITY_SERIES_SCAN", True
+        ),
+        kalshi_priority_series_page_limit=_int(
+            "RAASCAL_KALSHI_PRIORITY_SERIES_PAGE_LIMIT", 10
         ),
         polymarket_base_url=(
             _env("RAASCAL_POLYMARKET_BASE_URL")

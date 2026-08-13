@@ -56,6 +56,7 @@ def build_payload(market: MarketRecord, match: MatchResult) -> dict[str, Any]:
         "organization": match.organization,
         "severity": match.severity,
         "risk_score": match.risk_score,
+        "match_basis": match.match_basis,
         "matched_identity_terms": match.matched_identity_terms,
         "matched_metric_terms": match.matched_metric_terms,
         "risk_categories": match.categories,
@@ -91,6 +92,7 @@ def build_plain_text(market: MarketRecord, match: MatchResult) -> str:
     return f"""RaaScal Watch alert: {match.organization}
 
 Severity: {match.severity.upper()} ({match.risk_score}/100)
+Match basis: {match.match_basis.replace('_', ' ').title()}
 Source: {market.source}
 Contract: {market.title}
 Probability: {_percent(market.probability)}
@@ -181,7 +183,8 @@ class AlertDispatcher:
                         "type": "mrkdwn",
                         "text": (
                             f"*<{market.url}|{title}>*\n"
-                            f"Source: `{market.source}` · Risk score: *{match.risk_score}/100*\n"
+                            f"Source: `{market.source}` · Risk score: *{match.risk_score}/100* · "
+                            f"Match: *{_slack_escape(match.match_basis.replace('_', ' ').title())}*\n"
                             f"Probability: {_percent(market.probability)} · "
                             f"Volume: {_money(market.volume)} · Closes: {_when(market.closes_at)}"
                         ),

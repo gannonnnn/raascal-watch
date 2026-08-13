@@ -99,6 +99,7 @@ def test_kalshi_falls_back_to_supported_host_after_403() -> None:
             kalshi_fallback_base_url=(
                 "https://api.elections.kalshi.com/trade-api/v2"
             ),
+            kalshi_priority_series_scan=False,
         )
         collector = KalshiCollector()
         transport = httpx.MockTransport(handler)
@@ -135,6 +136,7 @@ def test_kalshi_remembers_working_fallback_for_session() -> None:
             kalshi_fallback_base_url=(
                 "https://api.elections.kalshi.com/trade-api/v2"
             ),
+            kalshi_priority_series_scan=False,
         )
         collector = KalshiCollector()
         transport = httpx.MockTransport(handler)
@@ -147,3 +149,131 @@ def test_kalshi_remembers_working_fallback_for_session() -> None:
     asyncio.run(run())
     assert requested_hosts.count("external-api.kalshi.com") == 1
     assert requested_hosts[-1] == "api.elections.kalshi.com"
+
+
+def test_kalshi_priority_series_pull_surfaces_flight_cancellation_family() -> None:
+    requests_seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        requests_seen.append(params)
+        series = params.get("series_ticker")
+        if series == "KXUSFLYCAN" and params.get("status") == "open":
+            return httpx.Response(
+                200,
+                json={
+                    "markets": [
+                        {
+                            "ticker": "KXUSFLYCAN-26AUG14-T5000",
+                            "event_ticker": "KXUSFLYCAN-26AUG14",
+                            "series_ticker": "KXUSFLYCAN",
+                            "title": "US flight cancellations for the week ending August 14",
+                            "rules_primary": "Outcome verified from Primary Source Agency.",
+                            "status": "open",
+                        }
+                    ],
+                    "cursor": "",
+                },
+                request=request,
+            )
+        return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+
+    async def run():
+        settings = replace(
+            get_settings(),
+            max_pages_per_source=1,
+            kalshi_base_url="https://api.elections.kalshi.com/trade-api/v2",
+            kalshi_fallback_base_url=None,
+            kalshi_priority_series_scan=True,
+            kalshi_priority_series_page_limit=2,
+        )
+        collector = KalshiCollector()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collector.fetch(client, settings)
+
+    result = asyncio.run(run())
+
+    assert result.error is None
+    assert any(
+        item.get("series_ticker") == "KXUSFLYCAN"
+        for item in requests_seen
+    )
+    assert {market.external_id for market in result.markets} == {
+        "KXUSFLYCAN-26AUG14-T5000"
+    }
+
+
+def test_kalshi_discovers_prefixed_airport_cancellation_series() -> None:
+    requested_series: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/series"):
+            return httpx.Response(
+                200,
+                json={
+                    "series": [
+                        {
+                            "ticker": "KXFLYCANCJFK",
+                            "title": "JFK flight cancellations",
+                            "category": "Transportation",
+                            "settlement_sources": [
+                                {
+                                    "name": "Primary Source Agency",
+                                    "url": "https://www.flightaware.com/",
+                                }
+                            ],
+                            "contract_terms_url": "https://assets.kalshi.com/AIRPORTDELAY.pdf",
+                        }
+                    ]
+                },
+                request=request,
+            )
+        params = dict(request.url.params)
+        series = params.get("series_ticker")
+        if series:
+            requested_series.append(series)
+        if series == "KXFLYCANCJFK" and params.get("status") == "open":
+            return httpx.Response(
+                200,
+                json={
+                    "markets": [
+                        {
+                            "ticker": "KXFLYCANCJFK-26AUG15-T50",
+                            "event_ticker": "KXFLYCANCJFK-26AUG15",
+                            "series_ticker": "KXFLYCANCJFK",
+                            "title": "Will at least 50% of scheduled passenger flights at JFK be cancelled?",
+                            "rules_primary": "Outcome verified from Primary Source Agency.",
+                            "status": "open",
+                        }
+                    ],
+                    "cursor": "",
+                },
+                request=request,
+            )
+        return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+
+    async def run():
+        settings = replace(
+            get_settings(),
+            max_pages_per_source=1,
+            kalshi_base_url="https://api.elections.kalshi.com/trade-api/v2",
+            kalshi_fallback_base_url=None,
+            kalshi_priority_series_scan=True,
+            kalshi_priority_series_page_limit=2,
+        )
+        collector = KalshiCollector()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collector.fetch(client, settings)
+
+    result = asyncio.run(run())
+
+    assert result.error is None
+    assert "KXFLYCANCJFK" in requested_series
+    market = next(
+        item
+        for item in result.markets
+        if item.external_id == "KXFLYCANCJFK-26AUG15-T50"
+    )
+    assert "FlightAware" not in market.description
+    assert market.raw["_raascal_series"]["ticker"] == "KXFLYCANCJFK"
+    assert market.raw["_raascal_series"]["settlement_sources"][0]["url"].endswith("flightaware.com/")

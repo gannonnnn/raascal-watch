@@ -1,6 +1,26 @@
 # RaaScal Watch monitoring profiles
 
-RaaScal Watch treats every result as a **candidate match**, not proof of abuse. The current profiles are designed to test distinct operational-risk surfaces.
+RaaScal Watch treats every result as a **candidate match**, not proof of abuse. Version 0.5 separates organization relationships from monitored topics.
+
+## Flight cancellation markets — monitored theme
+
+**What is monitored:** cancellation counts and rates, flights cancelled or canceled, airport-specific thresholds, nationwide weekly totals, airport closures, and related operational outcomes.
+
+**Why it matters:** a cancellation contract can create several possible incentive or information pathways involving airlines, airports, source agencies, labor groups, weather services, government authorities, and market participants. The topic should be surfaced before the correct organizational owner is known.
+
+**What the theme does not claim:** a theme match does not mean FlightAware supplies the data or that anyone is manipulating an outcome.
+
+**Likely owners:** Aviation Operations, Data Governance, Threat Intelligence, and Legal.
+
+## FlightAware — resolution-data dependency
+
+**What is monitored:** direct FlightAware references, known Kalshi cancellation families whose terms or public evidence connect FlightAware to settlement, and Kalshi series metadata that identifies or links to FlightAware as a source.
+
+**Why it matters:** a data provider may be neither the subject nor operator of a market, yet its API, dashboard, brand, or classifications can help determine who gets paid. That can create data-licensing, brand, safety, contractual, operational, and product-integrity questions.
+
+**Relationship confidence:** airport-level Kalshi cancellation contracts in the configured `KXFLYCANC...` family are marked **verified dependency** based on the applicable product terms. The `KXUSFLYCAN` weekly family is marked **linked dependency** and should be confirmed against the current contract rules or source link before escalation. Other cancellation contracts remain theme-only unless a source relationship is established.
+
+**Likely owners:** Legal, Data Licensing, Data Partnerships, Brand Protection, Product Integrity, and Aviation Operations.
 
 ## Spotify — engagement and reporting integrity
 
@@ -17,14 +37,6 @@ RaaScal Watch treats every result as a **candidate match**, not proof of abuse. 
 **Why it matters:** a contract can attach financial exposure to a service interruption. A sudden market move may also warrant review for advance knowledge of an incident or vulnerability. Neither condition is proof of misconduct.
 
 **Likely owners:** Security Operations, Threat Intelligence, Site Reliability Engineering, Incident Response, and Legal.
-
-## FlightAware — data, brand, and settlement-source dependency
-
-**What is monitored:** flight cancellations, delays, diversions, airport closures, flight status, cancellation rates, and contracts that name FlightAware data or products as a verification source.
-
-**Why it matters:** a data provider may be neither the subject nor the operator of a market, yet its name, API, dashboard, or trademark can become part of the mechanism that determines who gets paid. That can create data-licensing, brand, safety, contractual, operational, and product-integrity questions.
-
-**Likely owners:** Legal, Data Licensing, Data Partnerships, Brand Protection, Product Integrity, and Aviation Operations.
 
 ## YouTube — platform integrity and public-counter risk
 
@@ -50,17 +62,19 @@ RaaScal Watch treats every result as a **candidate match**, not proof of abuse. 
 
 **Likely owners:** Insider Risk, Legal & Compliance, Product Security, Site Reliability Engineering, AI Evaluation, Communications, and Finance.
 
-## The roles RaaScal Watch is testing
+## Relationship labels
 
-A named organization is not always the only organization that should receive an alert.
+- **Direct:** the organization is visible in the title, rules, or description.
+- **Verified dependency:** configured product terms or source metadata establish the organization’s role.
+- **Linked dependency:** evidence connects the family to the organization, but the current iteration should be confirmed.
+- **Possible dependency:** a plausible but unverified relationship requiring research.
+- **Theme:** the topic is relevant, but no organization relationship is asserted.
+
+## The roles RaaScal Watch is testing
 
 - **Subject:** the company, creator, product, or event being bet on.
 - **Controller:** a person or system capable of directly changing the outcome.
 - **Resolution oracle:** the chart, counter, data provider, status page, transcript, or announcement used to settle the contract.
 - **Downstream risk bearer:** the organization that absorbs legal exposure, investigation cost, distorted data, operational disruption, or bad decisions.
 
-A flight-cancellation contract may concern airlines and airports while FlightAware acts as the data source. An AI-release contract may concern OpenAI while employees, deployment partners, benchmark operators, and public status systems play different roles. Multiple profiles can therefore match one contract intentionally.
-
-## Contract-specific review briefs
-
-The profile is only the starting context. Version 0.3.1 also evaluates where the organization appears, which categories fired, the exact market metadata, and likely organizational role. This lets two matches for the same organization produce different questions and next steps—for example, an OpenAI release contract, ChatGPT outage contract, and AI benchmark contract are routed through different review pathways.
+A single contract can therefore have one topic match and several organization relationships while remaining one card in the dashboard.

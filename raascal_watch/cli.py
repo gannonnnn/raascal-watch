@@ -13,6 +13,7 @@ import uvicorn
 
 from .db import Database
 from .models import MarketRecord
+from .profile_sync import sync_profiles
 from .risk import RiskEngine
 from .scanner import Scanner
 from .settings import PROJECT_ROOT, get_settings
@@ -122,6 +123,54 @@ def command_refresh_guidance(_: argparse.Namespace) -> int:
 
 
 
+def command_sync_profiles(args: argparse.Namespace) -> int:
+    """Merge shipped profiles and rematch the stored market library."""
+    settings = get_settings()
+    database = Database(settings.db_path)
+    defaults_path = Path(args.defaults).expanduser().resolve()
+    summary = sync_profiles(
+        database,
+        settings.watchlist_path,
+        defaults_path,
+        force_rebuild=bool(args.force),
+    )
+
+    merge = summary.merge
+    if merge.changed:
+        if merge.added_organizations:
+            print("Added monitoring profile(s): " + ", ".join(merge.added_organizations))
+        if merge.updated_organizations:
+            print("Expanded monitoring profile(s): " + ", ".join(merge.updated_organizations))
+        if merge.added_categories:
+            print("Added risk category profile(s): " + ", ".join(merge.added_categories))
+        if merge.updated_categories:
+            print("Expanded risk category profile(s): " + ", ".join(merge.updated_categories))
+        if merge.backup_path:
+            print(f"Watchlist backup: {merge.backup_path}")
+    else:
+        print("Built-in monitoring profiles are already synchronized.")
+
+    if summary.rebuild is None:
+        print("Stored markets already reflect the current watchlist; rematch skipped.")
+        return 0
+
+    rebuild = summary.rebuild
+    print(
+        "Re-evaluated stored markets: "
+        f"{rebuild.matches_added} new profile match(es), "
+        f"{rebuild.matches_refreshed} existing match(es) refreshed."
+    )
+    print("Profile coverage discovered during re-indexing:")
+    for organization, counts in rebuild.by_organization.items():
+        print(
+            f"  - {organization}: {counts['candidates']} candidate record(s), "
+            f"{counts['added']} added "
+            f"({counts['active_added']} active / {counts['archived_added']} archived), "
+            f"{counts['refreshed']} refreshed"
+        )
+    return 0
+
+
 def command_lifecycle_summary(_: argparse.Namespace) -> int:
     settings = get_settings()
     database = Database(settings.db_path)
@@ -149,11 +198,13 @@ def command_validate(_: argparse.Namespace) -> int:
     settings = get_settings()
     watchlist = load_watchlist(settings.watchlist_path)
     print(f"Watchlist: {settings.watchlist_path}")
-    print("Organizations:")
+    print("Organizations and themes:")
     for organization in watchlist.organizations:
         print(
-            f"  - {organization.name}: {len(organization.identity_terms)} identity terms, "
-            f"{len(organization.metrics)} metric terms"
+            f"  - {organization.name} [{organization.profile_type}]: "
+            f"{len(organization.identity_terms)} identity/theme terms, "
+            f"{len(organization.metrics)} metric terms, "
+            f"{len(organization.dependency_rules)} dependency rule(s)"
         )
     print("Risk categories:")
     for category in watchlist.categories:
@@ -187,6 +238,7 @@ def command_export(args: argparse.Namespace) -> int:
             "organization",
             "severity",
             "risk_score",
+            "match_basis",
             "source",
             "external_id",
             "title",
@@ -224,7 +276,7 @@ def command_export(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="raascal-watch",
-        description="Monitor public prediction markets for references to watched companies and metrics.",
+        description="Monitor public prediction markets for watched organizations, themes, and dependencies.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -268,6 +320,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Regenerate contract-specific review guidance from existing live records",
     )
     refresh_guidance.set_defaults(func=command_refresh_guidance)
+
+    sync_profiles_parser = subparsers.add_parser(
+        "sync-profiles",
+        help="Merge shipped monitoring profiles and rematch stored markets",
+    )
+    sync_profiles_parser.add_argument(
+        "--defaults",
+        default=str(PROJECT_ROOT / "config" / "watchlist.defaults.yaml"),
+        help="Path to the shipped profile template",
+    )
+    sync_profiles_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-evaluate stored markets even when the watchlist has not changed",
+    )
+    sync_profiles_parser.set_defaults(func=command_sync_profiles)
 
     lifecycle = subparsers.add_parser(
         "lifecycle-summary",

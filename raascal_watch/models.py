@@ -28,6 +28,32 @@ class MarketRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class DependencyRule:
+    """Configuration-backed relationship between a contract family and profile."""
+
+    name: str
+    source: str = ""
+    external_id_prefixes: tuple[str, ...] = ()
+    event_ticker_prefixes: tuple[str, ...] = ()
+    series_ticker_prefixes: tuple[str, ...] = ()
+    terms: tuple[str, ...] = ()
+    evidence_terms: tuple[str, ...] = ()
+    confidence: str = "linked"
+    evidence: str = ""
+    theme: str = ""
+    categories: tuple[str, ...] = ()
+
+    @property
+    def candidate_prefixes(self) -> tuple[str, ...]:
+        values = [
+            *self.external_id_prefixes,
+            *self.event_ticker_prefixes,
+            *self.series_ticker_prefixes,
+        ]
+        return tuple(dict.fromkeys(item.strip() for item in values if item.strip()))
+
+
+@dataclass(slots=True, frozen=True)
 class OrganizationWatch:
     name: str
     aliases: tuple[str, ...]
@@ -37,11 +63,32 @@ class OrganizationWatch:
     stakeholders: tuple[str, ...] = ()
     playbook: tuple[str, ...] = ()
     enabled: bool = True
+    profile_type: str = "organization"
+    dependency_rules: tuple[DependencyRule, ...] = ()
 
     @property
     def identity_terms(self) -> tuple[str, ...]:
         values = [*self.aliases, *self.products, *self.executives]
         return tuple(dict.fromkeys(term.strip() for term in values if term.strip()))
+
+    @property
+    def candidate_terms(self) -> tuple[str, ...]:
+        values = [*self.identity_terms]
+        for rule in self.dependency_rules:
+            values.extend(rule.terms)
+            values.extend(rule.evidence_terms)
+        return tuple(dict.fromkeys(term.strip() for term in values if term.strip()))
+
+    @property
+    def candidate_prefixes(self) -> tuple[str, ...]:
+        values: list[str] = []
+        for rule in self.dependency_rules:
+            values.extend(rule.candidate_prefixes)
+        return tuple(dict.fromkeys(item.strip() for item in values if item.strip()))
+
+    @property
+    def is_theme(self) -> bool:
+        return self.profile_type.strip().lower() == "theme"
 
 
 @dataclass(slots=True, frozen=True)
@@ -67,6 +114,7 @@ class MatchResult:
     categories: list[str]
     risk_score: int
     severity: str
+    match_basis: str
     roles: list[str]
     reasons: list[str]
     review_questions: list[str]

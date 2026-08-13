@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from typing import Iterable
 
-from .models import MarketRecord, MatchResult, OrganizationWatch, Watchlist
+from .models import (
+    DependencyRule,
+    MarketRecord,
+    MatchResult,
+    OrganizationWatch,
+    Watchlist,
+)
 from .text import find_phrases, unique_strings
 
 
 DEFAULT_STAKEHOLDERS = ("Risk", "Product Analytics")
+_CONFIDENCE_RANK = {"possible": 1, "linked": 2, "verified": 3}
 
 
 def severity_for(score: int) -> str:
@@ -61,12 +70,13 @@ def _hours_until(value: datetime | None, now: datetime) -> float | None:
 
 def _metric_phrase(metric_hits: list[str], categories: list[str]) -> str:
     if metric_hits:
-        # Prefer the most specific phrase when a watchlist contains both a broad
-        # term and a longer version, such as "views" and "view count".
         selected: list[str] = []
         for term in sorted(unique_strings(metric_hits), key=len, reverse=True):
             lowered = term.lower()
-            if any(lowered in existing.lower() or existing.lower() in lowered for existing in selected):
+            if any(
+                lowered in existing.lower() or existing.lower() in lowered
+                for existing in selected
+            ):
                 continue
             selected.append(term)
             if len(selected) == 2:
@@ -89,19 +99,86 @@ def _metric_phrase(metric_hits: list[str], categories: list[str]) -> str:
     return "referenced outcome"
 
 
+def _raw_value(raw: dict, *names: str) -> str:
+    for name in names:
+        value = raw.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _starts_with_any(value: str, prefixes: Iterable[str]) -> bool:
+    clean = value.strip().upper()
+    return bool(clean) and any(clean.startswith(prefix.strip().upper()) for prefix in prefixes)
+
+
+def _dependency_rule_matches(market: MarketRecord, rule: DependencyRule) -> bool:
+    if rule.source and market.source.strip().lower() != rule.source:
+        return False
+
+    raw = market.raw or {}
+    external_match = _starts_with_any(market.external_id, rule.external_id_prefixes)
+    event_match = _starts_with_any(
+        _raw_value(raw, "event_ticker", "eventTicker"),
+        rule.event_ticker_prefixes,
+    )
+    series_match = _starts_with_any(
+        _raw_value(raw, "series_ticker", "seriesTicker"),
+        rule.series_ticker_prefixes,
+    )
+    has_prefix_rule = bool(
+        rule.external_id_prefixes
+        or rule.event_ticker_prefixes
+        or rule.series_ticker_prefixes
+    )
+    evidence_text = json.dumps(market.raw or {}, ensure_ascii=False, default=str)
+    evidence_match = bool(find_phrases(evidence_text, rule.evidence_terms))
+    if has_prefix_rule or rule.evidence_terms:
+        return external_match or event_match or series_match or evidence_match
+
+    return bool(find_phrases(market.searchable_text, rule.terms))
+
+
+def _matching_dependency_rules(
+    market: MarketRecord, organization: OrganizationWatch
+) -> list[DependencyRule]:
+    matches = [
+        rule
+        for rule in organization.dependency_rules
+        if _dependency_rule_matches(market, rule)
+    ]
+    return sorted(
+        matches,
+        key=lambda rule: _CONFIDENCE_RANK.get(rule.confidence, 0),
+        reverse=True,
+    )
+
+
 def _infer_roles(
     *,
     title_identity_hits: list[str],
     description_identity_hits: list[str],
     categories: list[str],
+    match_basis: str,
+    is_theme: bool,
 ) -> list[str]:
     category_set = set(categories)
     roles: list[str] = []
 
+    if is_theme:
+        roles.append("Monitored theme / contract family")
+        return roles
+
+    if match_basis.endswith("_dependency"):
+        roles.append("Resolution-data source / oracle")
+        roles.append(match_basis.replace("_", " ").title())
+
     if title_identity_hits:
         roles.append("Named subject / outcome owner")
 
-    if "oracle_and_data_dependency" in category_set:
+    if "oracle_and_data_dependency" in category_set and not any(
+        "Resolution-data" in role for role in roles
+    ):
         roles.append("Resolution-data source / oracle")
 
     if category_set.intersection(
@@ -147,6 +224,15 @@ def _build_review_questions(
         "What exact condition resolves this contract, and which source has final authority?"
     ]
 
+    if "Monitored theme / contract family" in role_set:
+        questions.extend(
+            [
+                "Which organization supplies the primary and fallback cancellation data for this exact contract family?",
+                "Does the contract measure a cancellation count, rate, threshold, airport-specific outcome, or nationwide total?",
+                "Which actors could know or influence the result—airlines, airport operators, data providers, labor groups, weather services, or public authorities?",
+            ]
+        )
+
     if "Resolution-data source / oracle" in role_set:
         questions.append(
             f"Is {organization.name} the primary resolution source, a fallback source, or only supporting evidence—and is that use authorized?"
@@ -187,7 +273,7 @@ def _build_review_questions(
             "Is economic exposure concentrated among a small number of holders, and did price or volume move without a clear public catalyst?"
         )
 
-    return unique_strings(questions)[:6]
+    return unique_strings(questions)[:7]
 
 
 def _build_contract_actions(
@@ -208,6 +294,14 @@ def _build_contract_actions(
             f"Preserve a timestamped snapshot of this {market.source.title()} contract—“{contract_title}”—including the full rules, URL, displayed probability ({_percent(market.probability)}), volume ({_money(market.volume)}), and close time ({close_label})."
         )
     ]
+
+    if "Monitored theme / contract family" in role_set:
+        actions.extend(
+            [
+                "Identify the market's product family, threshold, airport or geography, time window, and primary/fallback source agency before assigning an organizational owner.",
+                "Map the parties that may possess advance operational information, including airlines, airport operators, air-traffic authorities, labor groups, data vendors, and government agencies.",
+            ]
+        )
 
     if "Resolution-data source / oracle" in role_set:
         actions.append(
@@ -275,23 +369,16 @@ def _build_contract_actions(
                 f"Set a re-review milestone before {close_label}, with an earlier escalation if odds, volume, internal telemetry, or public reporting changes materially."
             )
 
-    # Organization playbooks remain useful context, but contract-generated steps
-    # come first and the list is intentionally capped to keep the dropdown usable.
     actions.extend(organization.playbook[:2])
     actions.append(
         "Escalate only when the contract is paired with a concrete concern—such as unexplained market movement, anomalous internal telemetry, unauthorized data use, nonpublic access, or a plausible influence path."
     )
 
-    return unique_strings(actions)[:8]
+    return unique_strings(actions)[:9]
 
 
 class RiskEngine:
-    """Transparent, deterministic scoring and contract-specific review guidance.
-
-    Scores are prioritization aids, not evidence that a market or user activity is abusive.
-    The review brief is generated from the specific contract title, rules, market
-    metadata, matched organization role, and configured watchlist—not from an LLM.
-    """
+    """Transparent, deterministic scoring and relationship-aware guidance."""
 
     def __init__(self, watchlist: Watchlist):
         self.watchlist = watchlist
@@ -309,29 +396,67 @@ class RiskEngine:
     ) -> MatchResult | None:
         text = market.searchable_text
         identity_hits = find_phrases(text, organization.identity_terms)
-        if not identity_hits:
+        dependency_rules = _matching_dependency_rules(market, organization)
+
+        if not identity_hits and not dependency_rules:
             return None
 
-        title_identity_hits = find_phrases(market.title, organization.identity_terms)
-        description_identity_hits = find_phrases(
-            market.description, organization.identity_terms
+        if organization.is_theme:
+            match_basis = "theme"
+            base_score = 8
+        elif identity_hits:
+            match_basis = "direct"
+            base_score = 15
+        else:
+            confidence = dependency_rules[0].confidence if dependency_rules else "possible"
+            match_basis = f"{confidence}_dependency"
+            base_score = {"verified": 18, "linked": 12, "possible": 8}.get(
+                confidence, 8
+            )
+
+        title_identity_hits = (
+            find_phrases(market.title, organization.identity_terms)
+            if identity_hits
+            else []
+        )
+        description_identity_hits = (
+            find_phrases(market.description, organization.identity_terms)
+            if identity_hits
+            else []
         )
         metric_hits = find_phrases(text, organization.metrics)
-        score = 15
-        reasons = [f"Referenced monitored identity: {', '.join(identity_hits[:5])}."]
+        score = base_score
+        reasons: list[str] = []
         categories: list[str] = []
         stakeholders = list(DEFAULT_STAKEHOLDERS) + list(organization.stakeholders)
 
-        if title_identity_hits:
+        if match_basis == "theme":
             reasons.append(
-                f"{organization.name} appears in the contract title, which is more consistent with a named subject or outcome owner."
+                f"Matched monitored theme: {', '.join(identity_hits[:5])}. This is a topic-level review profile, not an assertion that one company owns the outcome."
             )
-        elif description_identity_hits:
+        elif match_basis == "direct":
             reasons.append(
-                f"{organization.name} appears in the rules or description rather than the title, which may indicate a platform, data-source, oracle, or supporting-evidence role."
+                f"Referenced monitored identity: {', '.join(identity_hits[:5])}."
+            )
+            if title_identity_hits:
+                reasons.append(
+                    f"{organization.name} appears in the contract title, which is more consistent with a named subject or outcome owner."
+                )
+            elif description_identity_hits:
+                reasons.append(
+                    f"{organization.name} appears in the rules or description rather than the title, which may indicate a platform, data-source, oracle, or supporting-evidence role."
+                )
+        else:
+            for rule in dependency_rules:
+                label = rule.confidence.title()
+                reasons.append(
+                    f"{label} dependency match via {rule.name}. {rule.evidence}".strip()
+                )
+            reasons.append(
+                f"{organization.name} does not need to appear in the visible contract text for this configured source/product-family dependency to surface."
             )
 
-        if len(identity_hits) > 1:
+        if match_basis == "direct" and len(identity_hits) > 1:
             score += min(10, (len(identity_hits) - 1) * 3)
             reasons.append("Multiple monitored company, product, or executive terms matched.")
 
@@ -341,6 +466,7 @@ class RiskEngine:
                 f"Referenced monitored metric or behavior: {', '.join(metric_hits[:6])}."
             )
 
+        category_by_name = {category.name: category for category in self.watchlist.categories}
         for category in self.watchlist.categories:
             hits = find_phrases(text, category.terms)
             if not hits:
@@ -351,6 +477,19 @@ class RiskEngine:
                 f"{category.name.replace('_', ' ').title()} signal: {', '.join(hits[:6])}."
             )
             stakeholders.extend(category.stakeholders)
+
+        for rule in dependency_rules:
+            for category_name in rule.categories:
+                if category_name in categories:
+                    continue
+                category = category_by_name.get(category_name)
+                categories.append(category_name)
+                if category:
+                    score += category.weight
+                    stakeholders.extend(category.stakeholders)
+                    reasons.append(
+                        f"{category_name.replace('_', ' ').title()} was added by the configured dependency mapping."
+                    )
 
         volume = market.volume or 0.0
         if volume >= 1_000_000:
@@ -396,8 +535,10 @@ class RiskEngine:
             title_identity_hits=title_identity_hits,
             description_identity_hits=description_identity_hits,
             categories=categories,
+            match_basis=match_basis,
+            is_theme=organization.is_theme,
         )
-        reasons.append(f"Likely organizational role: {', '.join(roles)}.")
+        reasons.append(f"Likely profile role: {', '.join(roles)}.")
         metric_label = _metric_phrase(metric_hits, categories)
         review_questions = _build_review_questions(
             organization=organization,
@@ -415,13 +556,19 @@ class RiskEngine:
         )
 
         score = max(0, min(100, score))
+        matched_terms = (
+            unique_strings(identity_hits)
+            if identity_hits
+            else unique_strings(rule.name for rule in dependency_rules)
+        )
         return MatchResult(
             organization=organization.name,
-            matched_identity_terms=unique_strings(identity_hits),
+            matched_identity_terms=matched_terms,
             matched_metric_terms=unique_strings(metric_hits),
             categories=unique_strings(categories),
             risk_score=score,
             severity=severity_for(score),
+            match_basis=match_basis,
             roles=roles,
             reasons=unique_strings(reasons),
             review_questions=review_questions,

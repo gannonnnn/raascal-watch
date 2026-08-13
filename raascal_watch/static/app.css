@@ -253,3 +253,22 @@ td { border-top: 1px solid var(--line); padding: 11px 10px; white-space: nowrap;
   .series-metrics { grid-column: 1 / -1; flex-direction: row; }
   .organization-review-heading { flex-direction: column; gap: 4px; }
 }
+
+.match-basis-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 5px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #eef3f1;
+  border: 1px solid #d6e2de;
+  color: #42524f;
+  font-size: .62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+}
+.match-basis-badge.basis-verified_dependency { background: #e4f2ec; color: #1f6c50; border-color: #c8e2d7; }
+.match-basis-badge.basis-linked_dependency { background: #edf3f8; color: #365c79; border-color: #d5e1ea; }
+.match-basis-badge.basis-possible_dependency { background: #fff6df; color: #795d18; border-color: #ead9a8; }
+.match-basis-badge.basis-theme { background: #f1eafb; color: #5e4680; border-color: #dfd2f0; }

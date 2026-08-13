@@ -4,7 +4,7 @@
 
 Run `start-raascal-watch.command`.
 
-The first launch creates a private Python environment, installs the project, removes any synthetic records left by older versions, starts the dashboard, and opens:
+The first launch creates a private Python environment, installs the project, synchronizes newly shipped organization profiles into the local watchlist, re-evaluates stored markets when that watchlist changes, removes any synthetic records left by older versions, starts the dashboard, and opens:
 
 `http://127.0.0.1:8000`
 
@@ -26,10 +26,38 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
+raascal-watch sync-profiles --defaults ./config/watchlist.defaults.yaml
 raascal-watch validate-config
 raascal-watch purge-demo
 raascal-watch serve
 ```
+
+
+## Organization profile synchronization
+
+Every enabled organization and monitored theme appears in the profile filter, including profiles with zero current matches. The number beside each profile is the active or archived contract count for the selected view.
+
+When a release adds a profile, RaaScal Watch merges it into the existing `config/watchlist.yaml`, preserves custom organizations and local terms, creates a timestamped backup, and re-evaluates stored market records. A fingerprint prevents the large re-index from repeating on every launch.
+
+Run the synchronization manually with:
+
+```bash
+raascal-watch sync-profiles --defaults ./config/watchlist.defaults.yaml
+```
+
+Add `--force` only when you intentionally want to re-evaluate the stored library again.
+
+
+## Flight-cancellation monitoring
+
+Use the profile filter in two ways:
+
+- Select **Flight cancellation markets — theme** to see qualifying cancellation contracts without assigning them to one data provider.
+- Select **FlightAware** to see direct, verified, or linked FlightAware relationships only.
+
+A known FlightAware-dependent contract can carry both profiles while appearing once in the dashboard. The review panel explains whether the relationship is direct, verified, linked, or theme-only.
+
+The Kalshi collector directly queries series referenced by dependency rules, so the weekly `KXUSFLYCAN` family and discovered `KXFLYCANC...` airport series are not dependent on their position in the broad market pagination.
 
 ## Active queue and archive
 

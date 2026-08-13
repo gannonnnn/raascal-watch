@@ -30,12 +30,14 @@ if [ ! -f .env ]; then
   cp .env.example .env
 fi
 
+# Merge newly shipped organizations, themes, and dependency mappings into an
+# older local watchlist without deleting custom profiles or terms. Stored markets are rematched only when
+# the watchlist fingerprint changes.
+raascal-watch sync-profiles --defaults "$PWD/config/watchlist.defaults.yaml"
 raascal-watch validate-config
 # Version 0.3 is live-only by default. Remove any synthetic records left by
 # earlier builds while preserving all Kalshi and Polymarket history.
 raascal-watch purge-demo
-# Refresh role-aware, contract-specific guidance for matches already stored locally.
-raascal-watch refresh-guidance
 # Version 0.4 calculates lifecycle dynamically: expired contracts leave the
 # current queue immediately but remain available in the historical archive.
 raascal-watch lifecycle-summary

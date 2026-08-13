@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.0 — Theme and dependency-aware flight-cancellation monitoring
+
+- Added **Flight cancellation markets** as a monitored theme so cancellation contracts can surface without assuming one organization owns the result.
+- Added configured FlightAware dependency mappings for Kalshi airport-cancellation and weekly U.S. flight-cancellation families.
+- Added transparent match-basis labels: direct, verified dependency, linked dependency, possible dependency, and theme.
+- Added settlement-source metadata matching so a generic source label that links to FlightAware can still create an explainable dependency match.
+- Added targeted Kalshi series pulls driven by dependency rules, preventing monitored niche families from being missed by the broad page cap.
+- Added Transportation-series discovery for concrete tickers matching configured family prefixes such as `KXFLYCANC...`.
+- Updated the profile filter to separate organizations from monitored themes while preserving one-card multi-profile results.
+- Updated stored-market backfill to search raw source metadata and ticker prefixes, with no retroactive notifications.
+- Added automated coverage for direct, verified, linked, theme-only, priority-series, series-discovery, profile-sync, and dashboard-filter behavior.
+
+## 0.4.1 — Profile synchronization and stored-market backfill
+
+- Fixed an updater issue that preserved an older local `watchlist.yaml` without adding newly shipped profiles such as FlightAware and OpenAI / ChatGPT.
+- Added a safe watchlist merge that appends missing built-in organizations, terms, playbooks, and risk categories while preserving custom organizations and local additions.
+- Creates a timestamped backup before modifying an existing watchlist.
+- Added `raascal-watch sync-profiles` and a watchlist fingerprint so stored markets are re-evaluated only when the configured profiles change.
+- Backfills organization matches from the existing SQLite market library without sending retroactive notifications.
+- The organization filter now lists every enabled profile, including profiles with zero active matches, and displays active/archive counts.
+- Added a clearer empty state distinguishing an enabled profile with no current match from a missing profile.
+- Added automated coverage for legacy-watchlist migration, FlightAware backfill, zero-match filter visibility, and no-op repeat launches.
+
 ## 0.4.0 — Active review queue and lifecycle-aware UI
 
 - Made the standard review queue active-only using both source status and closing time.

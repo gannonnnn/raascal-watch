@@ -200,6 +200,8 @@ def test_template_uses_auto_submit_and_separate_archive_view() -> None:
 
     assert "data-auto-submit-form" in template
     assert "data-auto-submit" in template
+    assert '<optgroup label="Organizations">' in template
+    assert '<optgroup label="Monitored themes">' in template
     assert "Filter results</button>" not in template
     assert "Active review queue" in template
     assert "Historical records are available for research and backtesting only" in template

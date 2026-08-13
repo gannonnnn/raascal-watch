@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS matches (
     categories_json TEXT NOT NULL DEFAULT '[]',
     risk_score INTEGER NOT NULL,
     severity TEXT NOT NULL,
+    match_basis TEXT NOT NULL DEFAULT 'direct',
     roles_json TEXT NOT NULL DEFAULT '[]',
     reasons_json TEXT NOT NULL DEFAULT '[]',
     review_questions_json TEXT NOT NULL DEFAULT '[]',
@@ -134,6 +135,11 @@ CREATE TABLE IF NOT EXISTS notification_log (
     status TEXT NOT NULL,
     detail TEXT
 );
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -183,6 +189,12 @@ class Database:
                 "review_questions_json",
                 "TEXT NOT NULL DEFAULT '[]'",
             )
+            self._ensure_column(
+                connection,
+                "matches",
+                "match_basis",
+                "TEXT NOT NULL DEFAULT 'direct'",
+            )
 
     @staticmethod
     def _ensure_column(
@@ -191,6 +203,23 @@ class Database:
         columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def get_meta(self, key: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM app_meta WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO app_meta(key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
 
     def source_initialized(self, source: str) -> bool:
         with self.connect() as connection:
@@ -376,6 +405,7 @@ class Database:
             _json(result.categories),
             result.risk_score,
             result.severity,
+            result.match_basis,
             _json(result.roles),
             _json(result.reasons),
             _json(result.review_questions),
@@ -398,7 +428,7 @@ class Database:
                         matched_identity_terms_json = ?,
                         matched_metric_terms_json = ?,
                         categories_json = ?,
-                        risk_score = ?, severity = ?, roles_json = ?, reasons_json = ?,
+                        risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
                         review_questions_json = ?, stakeholders_json = ?,
                         actions_json = ?, last_seen_at = ?
                     WHERE market_id = ? AND organization = ?
@@ -412,9 +442,9 @@ class Database:
                 INSERT INTO matches(
                     market_id, organization, matched_identity_terms_json,
                     matched_metric_terms_json, categories_json, risk_score,
-                    severity, roles_json, reasons_json, review_questions_json,
+                    severity, match_basis, roles_json, reasons_json, review_questions_json,
                     stakeholders_json, actions_json, first_seen_at, last_seen_at, alert_state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     market_id,
@@ -424,6 +454,7 @@ class Database:
                     _json(result.categories),
                     result.risk_score,
                     result.severity,
+                    result.match_basis,
                     _json(result.roles),
                     _json(result.reasons),
                     _json(result.review_questions),
@@ -474,7 +505,7 @@ class Database:
                     matched_identity_terms_json = ?,
                     matched_metric_terms_json = ?,
                     categories_json = ?,
-                    risk_score = ?, severity = ?, roles_json = ?, reasons_json = ?,
+                    risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
                     review_questions_json = ?, stakeholders_json = ?, actions_json = ?
                 WHERE market_id = ? AND organization = ?
                 """,
@@ -484,6 +515,7 @@ class Database:
                     _json(result.categories),
                     result.risk_score,
                     result.severity,
+                    result.match_basis,
                     _json(result.roles),
                     _json(result.reasons),
                     _json(result.review_questions),
@@ -494,6 +526,90 @@ class Database:
                 ),
             )
             return cursor.rowcount > 0
+
+    def list_markets_matching_terms(
+        self,
+        terms: tuple[str, ...] | list[str],
+        *,
+        external_id_prefixes: tuple[str, ...] | list[str] = (),
+        include_demo: bool = False,
+    ) -> list[tuple[int, MarketRecord]]:
+        """Return stored markets that may fit a profile.
+
+        Text terms provide the normal broad prefilter. Source contract-family
+        prefixes allow dependency profiles (for example FlightAware) to be
+        reconsidered even when the company name is absent from visible rules.
+        The risk engine performs the final exact and source-aware validation.
+        """
+        clean_terms = list(
+            dict.fromkeys(
+                term.strip().casefold()
+                for term in terms
+                if isinstance(term, str) and term.strip()
+            )
+        )
+        clean_prefixes = list(
+            dict.fromkeys(
+                prefix.strip().upper()
+                for prefix in external_id_prefixes
+                if isinstance(prefix, str) and prefix.strip()
+            )
+        )
+        if not clean_terms and not clean_prefixes:
+            return []
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        for term in clean_terms:
+            clauses.append(
+                "(LOWER(m.title) LIKE ? OR LOWER(m.description) LIKE ? OR LOWER(m.raw_json) LIKE ?)"
+            )
+            pattern = f"%{term}%"
+            params.extend((pattern, pattern, pattern))
+        for prefix in clean_prefixes:
+            clauses.append("UPPER(m.external_id) LIKE ?")
+            params.append(f"{prefix}%")
+        source_clause = "" if include_demo else "AND m.source <> 'demo'"
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    m.id AS market_id, m.source, m.external_id, m.title,
+                    m.description, m.url, m.status, m.source_created_at,
+                    m.closes_at, m.probability, m.volume, m.volume_24h,
+                    m.liquidity, m.open_interest, m.raw_json
+                FROM markets m
+                WHERE ({' OR '.join(clauses)}) {source_clause}
+                ORDER BY m.id
+                """,
+                tuple(params),
+            ).fetchall()
+
+        output: list[tuple[int, MarketRecord]] = []
+        for row in rows:
+            output.append(
+                (
+                    int(row["market_id"]),
+                    MarketRecord(
+                        source=row["source"],
+                        external_id=row["external_id"],
+                        title=row["title"],
+                        description=row["description"],
+                        url=row["url"],
+                        status=row["status"],
+                        created_at=parse_datetime(row["source_created_at"]),
+                        closes_at=parse_datetime(row["closes_at"]),
+                        probability=row["probability"],
+                        volume=row["volume"],
+                        volume_24h=row["volume_24h"],
+                        liquidity=row["liquidity"],
+                        open_interest=row["open_interest"],
+                        raw=_loads(row["raw_json"], {}),
+                    ),
+                )
+            )
+        return output
 
     def list_matched_markets(
         self, *, include_demo: bool = False
@@ -739,6 +855,7 @@ class Database:
                     "categories": row["categories"],
                     "risk_score": row["risk_score"],
                     "severity": row["severity"],
+                    "match_basis": row.get("match_basis") or "direct",
                     "roles": row["roles"],
                     "reasons": row["reasons"],
                     "review_questions": row["review_questions"],
@@ -893,7 +1010,7 @@ class Database:
                 SELECT
                     mt.id AS match_id, mt.organization,
                     mt.matched_identity_terms_json, mt.matched_metric_terms_json,
-                    mt.categories_json, mt.risk_score, mt.severity,
+                    mt.categories_json, mt.risk_score, mt.severity, mt.match_basis,
                     mt.roles_json, mt.reasons_json, mt.review_questions_json,
                     mt.stakeholders_json, mt.actions_json,
                     mt.first_seen_at AS match_first_seen_at,
@@ -1005,19 +1122,23 @@ class Database:
                 "SELECT MAX(finished_at) AS finished_at FROM scan_runs "
                 + ("" if include_demo else "WHERE source <> 'demo'")
             ).fetchone()["finished_at"]
-            organizations = [
-                row["organization"]
-                for row in connection.execute(
-                    f"""
-                    SELECT DISTINCT mt.organization AS organization
-                    FROM matches mt
-                    JOIN markets m ON m.id = mt.market_id
-                    WHERE {scope_sql} {demo_clause}
-                    ORDER BY mt.organization
-                    """,
-                    tuple(scope_params),
-                ).fetchall()
-            ]
+            organization_rows = connection.execute(
+                f"""
+                SELECT mt.organization AS organization,
+                       COUNT(DISTINCT m.id) AS contract_count
+                FROM matches mt
+                JOIN markets m ON m.id = mt.market_id
+                WHERE {scope_sql} {demo_clause}
+                GROUP BY mt.organization
+                ORDER BY mt.organization
+                """,
+                tuple(scope_params),
+            ).fetchall()
+            organizations = [row["organization"] for row in organization_rows]
+            organization_counts = {
+                row["organization"]: int(row["contract_count"])
+                for row in organization_rows
+            }
             sources = [
                 row["source"]
                 for row in connection.execute(
@@ -1047,6 +1168,7 @@ class Database:
             "archive_matches": int(archive_count),
             "last_scan": last_scan,
             "organizations": organizations,
+            "organization_counts": organization_counts,
             "sources": sources,
             "source_states": source_states,
         }
@@ -1072,3 +1194,4 @@ class Database:
             connection.execute("DELETE FROM markets")
             connection.execute("DELETE FROM source_state")
             connection.execute("DELETE FROM scan_runs")
+            connection.execute("DELETE FROM app_meta")

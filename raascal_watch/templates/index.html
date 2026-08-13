@@ -14,7 +14,7 @@
       {% endif %}
 
       <div class="organization-line">
-        <span>Matched organizations</span>
+        <span>Matched profiles</span>
         <div class="organization-tags">
           {% for organization in item.organizations %}<span>{{ organization }}</span>{% endfor %}
         </div>
@@ -43,14 +43,15 @@
 
       <details class="contract-review">
         <summary>Review this active contract</summary>
-        <p class="guidance-note"><strong>Contract-specific guidance:</strong> generated deterministically from this listing’s title, rules, source, probability, volume, close time, matched organization role, and configured watchlist. Validate it before acting.</p>
+        <p class="guidance-note"><strong>Contract-specific guidance:</strong> generated deterministically from this listing’s title, rules, source, probability, volume, close time, matched profile role, and configured watchlist. Validate it before acting.</p>
 
         {% for review in item.reviews %}
           <section class="organization-review">
             <div class="organization-review-heading">
               <div>
-                <p class="eyebrow">Organization-specific review</p>
+                <p class="eyebrow">Profile-specific review</p>
                 <h4>{{ review.organization }}</h4>
+                <span class="match-basis-badge basis-{{ review.match_basis }}">{{ review.match_basis | replace('_', ' ') | title }}</span>
               </div>
               <span class="review-score severity-text-{{ review.severity }}">{{ review.severity | title }} · {{ review.risk_score }}/100</span>
             </div>
@@ -116,7 +117,7 @@
         <p class="hero-copy">Kalshi and Polymarket are checked every {{ poll_interval }} minutes. Only active contracts enter the review queue. Closed, inactive, settled, and expired contracts move automatically to a separate archive.</p>
       </div>
       <div class="watching-card">
-        <span class="small-label">Watching</span>
+        <span class="small-label">Watching organizations and themes</span>
         {% if watched_organizations %}
           <div class="watchlist-tags">
             {% for item in watched_organizations %}<span>{{ item }}</span>{% endfor %}
@@ -171,7 +172,7 @@
           <h3>{{ 'Active candidate contracts' if view == 'active' else 'Archived contracts' }}</h3>
           <p class="panel-subcopy">
             {% if view == 'active' %}
-              Only currently open or upcoming contracts appear here. Exact duplicates are collapsed, multi-organization matches share one card, and related thresholds or dates are grouped.
+              Only currently open or upcoming contracts appear here. Exact duplicates are collapsed, multi-profile matches share one card, and related thresholds or dates are grouped.
             {% else %}
               Historical records are available for research and backtesting only. They have no review or acknowledgement controls.
             {% endif %}
@@ -186,12 +187,23 @@
       <form class="filters" method="get" data-auto-submit-form>
         <input type="hidden" name="view" value="{{ view }}">
         {% if include_demo %}<input type="hidden" name="include_demo" value="true">{% endif %}
-        <label>Organization
+        <label>Organization / theme
           <select name="organization" data-auto-submit>
-            <option value="">All</option>
-            {% for item in stats.organizations %}
-              <option value="{{ item }}" {{ 'selected' if filters.organization == item else '' }}>{{ item }}</option>
-            {% endfor %}
+            <option value="">All profiles</option>
+            <optgroup label="Organizations">
+              {% for item in organization_filter_options if item.profile_type != 'theme' %}
+                <option value="{{ item.name }}" {{ 'selected' if filters.organization == item.name else '' }}>
+                  {{ item.name }} ({{ item.count }} {{ 'active' if view == 'active' else 'archived' }})
+                </option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="Monitored themes">
+              {% for item in organization_filter_options if item.profile_type == 'theme' %}
+                <option value="{{ item.name }}" {{ 'selected' if filters.organization == item.name else '' }}>
+                  {{ item.name }} — theme ({{ item.count }} {{ 'active' if view == 'active' else 'archived' }})
+                </option>
+              {% endfor %}
+            </optgroup>
           </select>
         </label>
         <label>Severity
@@ -276,7 +288,11 @@
       {% else %}
         <div class="empty-state">
           <strong>No {{ 'active' if view == 'active' else 'archived' }} contracts match this view.</strong>
-          <p>{{ 'Try clearing a filter or run a live scan.' if view == 'active' else 'Closed contracts will appear here automatically.' }}</p>
+          {% if view == 'active' and filters.organization and selected_profile_enabled %}
+            <p>{{ filters.organization }} is enabled in the watchlist, but no active stored contract currently matches this profile. Run a live scan to check for newly listed markets; historical matches remain under Archive.</p>
+          {% else %}
+            <p>{{ 'Try clearing a filter or run a live scan.' if view == 'active' else 'Closed contracts will appear here automatically.' }}</p>
+          {% endif %}
         </div>
       {% endif %}
     </section>
