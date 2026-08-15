@@ -23,6 +23,23 @@ The company named in the market is not always the only party exposed. An organiz
 
 RaaScal Watch is intended to surface that changed incentive environment before the signal is accepted at face value.
 
+## Version 0.6: reviewer feedback and calibration
+
+RaaScal Watch now measures whether surfaced profile relationships are useful rather than treating every match as equally valuable. Each organization or theme attached to an active contract can receive one structured reviewer assessment:
+
+- **Actionable** — an owner should investigate or change a control now.
+- **Monitor** — relevant enough to track, but not an immediate action.
+- **Informational** — useful context with no current operational response.
+- **False positive** — not meaningfully connected to the profile or risk pathway.
+
+Reviewers can also record why they chose that label, rate the suggested guidance, correct the inferred organizational role, propose a better owner, and add a note. A multi-profile contract is reviewed at the profile-match level because the same market may be actionable for one organization and merely informational for another.
+
+The dashboard includes a calibration snapshot showing structured-review counts, actionable/monitor rate, false-positive rate, guidance usefulness, and breakdowns by profile and risk pathway. The active queue can be filtered by reviewer decision and sorted with unreviewed work first. Structured feedback remains attached when a contract later moves to Archive.
+
+Reviewer assessments are calibration data, not ground truth. They do not prove abuse, trader intent, or misconduct.
+
+See `UPDATE_NOTES_V0_6.md` for the schema, decision definitions, and migration behavior.
+
 ## Version 0.5: topic and dependency-aware monitoring
 
 RaaScal Watch can now surface a contract even when the affected organization is absent from the visible title or rules. The first implementation covers flight-cancellation markets.
@@ -96,7 +113,10 @@ The normal dashboard now shows **live public-market records only**.
 - Stores active and archived market history in SQLite
 - Keeps expired contracts out of the current review queue while retaining them for research
 - Collapses exact contract duplicates and groups related event thresholds/dates
-- Automatically applies filters and supports priority, closing-time, volume, and recency sorting
+- Automatically applies filters and supports priority, unreviewed-first, closing-time, volume, and recency sorting
+- Captures structured reviewer decisions, reasons, guidance ratings, role corrections, owner corrections, and notes at the profile-match level
+- Shows calibration metrics by organization/theme and risk pathway
+- Exports structured review feedback to CSV or JSON
 - Includes automated tests and optional synthetic fixtures for development
 
 The prototype only reads public market-listing data. It does not place trades, access private accounts, or identify individual traders.
@@ -177,6 +197,20 @@ The live dashboard continues to hide it. To inspect the fixtures explicitly, ope
 ```text
 http://127.0.0.1:8000/?source=demo&include_demo=true
 ```
+
+## Review and calibrate candidate matches
+
+Open **Review guidance and record an assessment** on an active contract. Each matched organization or theme has its own assessment form. Choose one decision, optionally add reason tags or corrections, and save.
+
+Use the **Reviewer decision** filter to isolate unreviewed, actionable, monitor, informational, false-positive, or legacy-reviewed matches. Use **Unreviewed first** sorting to work through the queue.
+
+Export the structured feedback with:
+
+```bash
+raascal-watch export-feedback --format csv --view all --output ./exports/reviewer_feedback.csv
+```
+
+The normal `raascal-watch export` command also includes the latest structured feedback fields alongside each match.
 
 ## Configure a company watchlist
 

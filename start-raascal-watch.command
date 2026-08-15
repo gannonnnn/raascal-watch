@@ -41,6 +41,9 @@ raascal-watch purge-demo
 # Version 0.4 calculates lifecycle dynamically: expired contracts leave the
 # current queue immediately but remain available in the historical archive.
 raascal-watch lifecycle-summary
+# Version 0.6 keeps reviewer decisions separate from raw match volume and shows
+# how much calibration work remains without changing the stored results.
+raascal-watch calibration-summary
 
 echo
 echo "RaaScal Watch is opening at http://127.0.0.1:8000"

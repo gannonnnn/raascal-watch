@@ -60,3 +60,67 @@ document.querySelectorAll('.contract-review-button').forEach((button) => {
     }
   });
 });
+
+// v0.6 structured reviewer feedback. Each form applies to one profile match,
+// not the entire contract, because one market can affect several organizations
+// in materially different ways.
+const savedScrollTarget = window.sessionStorage.getItem('raascal-scroll-target');
+if (savedScrollTarget) {
+  window.sessionStorage.removeItem('raascal-scroll-target');
+  window.requestAnimationFrame(() => {
+    document.getElementById(savedScrollTarget)?.scrollIntoView({ block: 'center' });
+  });
+}
+
+document.querySelectorAll('[data-feedback-form]').forEach((form) => {
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const matchId = form.dataset.matchId;
+    const marketId = form.dataset.marketId;
+    const button = form.querySelector('.save-feedback-button');
+    const status = form.querySelector('.feedback-save-status');
+    const formData = new FormData(form);
+    const decision = formData.get('decision');
+
+    if (!decision) {
+      showToast('Choose an assessment before saving.', true);
+      return;
+    }
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Saving…';
+    }
+    if (status) status.textContent = 'Saving…';
+
+    const payload = {
+      decision,
+      reason_codes: formData.getAll('reason_codes'),
+      guidance_rating: formData.get('guidance_rating') || null,
+      note: formData.get('note') || '',
+      corrected_role: formData.get('corrected_role') || '',
+      suggested_owner: formData.get('suggested_owner') || '',
+    };
+
+    try {
+      const response = await fetch(`/api/matches/${matchId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Could not save assessment');
+      if (status) status.textContent = 'Saved';
+      showToast(`${result.decision_label} assessment saved.`);
+      window.sessionStorage.setItem('raascal-scroll-target', `contract-${marketId}`);
+      window.setTimeout(() => window.location.reload(), 450);
+    } catch (error) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Save assessment';
+      }
+      if (status) status.textContent = '';
+      showToast(error.message || 'Could not save assessment', true);
+    }
+  });
+});

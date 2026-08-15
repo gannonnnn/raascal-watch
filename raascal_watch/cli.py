@@ -184,6 +184,28 @@ def command_lifecycle_summary(_: argparse.Namespace) -> int:
     )
     return 0
 
+def command_calibration_summary(_: argparse.Namespace) -> int:
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    summary = database.feedback_summary(view="active", include_demo=False)
+    counts = summary["decision_counts"]
+    print(
+        "Reviewer calibration: "
+        f"{summary['reviewed']} structured review(s), "
+        f"{summary['legacy_reviewed']} legacy review(s), "
+        f"{summary['unreviewed']} unreviewed profile match(es)."
+    )
+    print(
+        "  Decisions: "
+        f"{counts['actionable']} actionable, "
+        f"{counts['monitor']} monitor, "
+        f"{counts['informational']} informational, "
+        f"{counts['false_positive']} false positive."
+    )
+    return 0
+
+
 def command_serve(args: argparse.Namespace) -> int:
     uvicorn.run(
         "raascal_watch.app:app",
@@ -247,6 +269,13 @@ def command_export(args: argparse.Namespace) -> int:
             "volume",
             "closes_at",
             "alert_state",
+            "review_decision",
+            "review_reason_codes",
+            "guidance_rating",
+            "review_note",
+            "corrected_role",
+            "suggested_owner",
+            "feedback_updated_at",
             "matched_identity_terms",
             "matched_metric_terms",
             "categories",
@@ -270,6 +299,55 @@ def command_export(args: argparse.Namespace) -> int:
                 }
                 writer.writerow(clean)
     print(f"Exported {len(rows)} matches to {output}")
+    return 0
+
+
+def command_export_feedback(args: argparse.Namespace) -> int:
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    rows = database.list_review_feedback(view=args.view, limit=50000)
+    output = Path(args.output).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if args.format == "json":
+        output.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    else:
+        fields = [
+            "match_id",
+            "market_id",
+            "organization",
+            "decision",
+            "reason_codes",
+            "guidance_rating",
+            "note",
+            "corrected_role",
+            "suggested_owner",
+            "risk_score",
+            "severity",
+            "match_basis",
+            "categories",
+            "source",
+            "external_id",
+            "title",
+            "url",
+            "closes_at",
+            "created_at",
+            "updated_at",
+        ]
+        with output.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for row in rows:
+                clean = {
+                    field: (
+                        " | ".join(str(item) for item in row.get(field, []))
+                        if isinstance(row.get(field), list)
+                        else row.get(field)
+                    )
+                    for field in fields
+                }
+                writer.writerow(clean)
+    print(f"Exported {len(rows)} structured review(s) to {output}")
     return 0
 
 
@@ -343,6 +421,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lifecycle.set_defaults(func=command_lifecycle_summary)
 
+    calibration = subparsers.add_parser(
+        "calibration-summary",
+        help="Show structured-review and unreviewed profile-match counts",
+    )
+    calibration.set_defaults(func=command_calibration_summary)
+
     validate = subparsers.add_parser("validate-config", help="Validate the YAML watchlist")
     validate.set_defaults(func=command_validate)
 
@@ -368,6 +452,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include explicitly seeded synthetic demo matches",
     )
     export.set_defaults(func=command_export)
+
+    feedback_export = subparsers.add_parser(
+        "export-feedback",
+        help="Export structured reviewer decisions for calibration",
+    )
+    feedback_export.add_argument("--format", choices=["csv", "json"], default="csv")
+    feedback_export.add_argument("--output", required=True)
+    feedback_export.add_argument(
+        "--view",
+        choices=["active", "archive", "all"],
+        default="all",
+        help="Export all structured reviews by default",
+    )
+    feedback_export.set_defaults(func=command_export_feedback)
     return parser
 
 

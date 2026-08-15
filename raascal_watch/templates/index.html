@@ -32,28 +32,39 @@
       {% endif %}
     </div>
 
-    {% if view == 'active' %}
-      <div class="alert-actions">
-        {% if not item.all_reviewed %}
-          <button class="contract-review-button" type="button" data-market-id="{{ item.market_id }}">Mark reviewed</button>
-        {% else %}
-          <span class="acknowledged">Reviewed</span>
-        {% endif %}
-      </div>
+    <div class="alert-actions">
+      {% if view == 'active' %}
+        <span class="review-progress {{ 'complete' if item.all_reviewed else ('partial' if item.reviewed_count else '') }}">
+          {{ item.reviewed_count }}/{{ item.review_total }} assessed
+        </span>
+      {% elif item.reviewed_count %}
+        <span class="review-progress complete">{{ item.reviewed_count }} historical assessment{{ '' if item.reviewed_count == 1 else 's' }}</span>
+      {% endif %}
+    </div>
 
+    {% if view == 'active' %}
       <details class="contract-review">
-        <summary>Review this active contract</summary>
-        <p class="guidance-note"><strong>Contract-specific guidance:</strong> generated deterministically from this listing’s title, rules, source, probability, volume, close time, matched profile role, and configured watchlist. Validate it before acting.</p>
+        <summary>Review guidance and record an assessment</summary>
+        <p class="guidance-note"><strong>Contract-specific guidance:</strong> generated deterministically from this listing’s title, rules, source, probability, volume, close time, matched profile role, and configured watchlist. Your assessment below is what calibrates the system.</p>
 
         {% for review in item.reviews %}
-          <section class="organization-review">
+          <section class="organization-review" data-match-review="{{ review.match_id }}">
             <div class="organization-review-heading">
               <div>
                 <p class="eyebrow">Profile-specific review</p>
                 <h4>{{ review.organization }}</h4>
                 <span class="match-basis-badge basis-{{ review.match_basis }}">{{ review.match_basis | replace('_', ' ') | title }}</span>
               </div>
-              <span class="review-score severity-text-{{ review.severity }}">{{ review.severity | title }} · {{ review.risk_score }}/100</span>
+              <div class="review-heading-status">
+                <span class="review-score severity-text-{{ review.severity }}">{{ review.severity | title }} · {{ review.risk_score }}/100</span>
+                {% if review.review_decision %}
+                  <span class="assessment-badge decision-{{ review.review_decision }}">{{ review_decision_labels.get(review.review_decision, review.review_decision | replace('_', ' ') | title) }}</span>
+                {% elif review.acknowledged_at %}
+                  <span class="assessment-badge legacy-reviewed">Legacy reviewed</span>
+                {% else %}
+                  <span class="assessment-badge not-assessed">Not assessed</span>
+                {% endif %}
+              </div>
             </div>
 
             <h5>Likely role</h5>
@@ -75,10 +86,88 @@
                 <ol>{% for action in review.actions %}<li>{{ action }}</li>{% endfor %}</ol>
               </div>
             </div>
+
+            <form class="feedback-form" data-feedback-form data-match-id="{{ review.match_id }}" data-market-id="{{ item.market_id }}">
+              <div class="feedback-heading">
+                <div>
+                  <h5>Reviewer assessment</h5>
+                  <p>Label this profile match so RaaScal Watch can measure useful signal versus noise.</p>
+                </div>
+                <span class="feedback-save-status" aria-live="polite"></span>
+              </div>
+
+              <div class="decision-grid" role="radiogroup" aria-label="Reviewer decision for {{ review.organization }}">
+                {% for option in review_decisions %}
+                  <label class="decision-option decision-option-{{ option.value }}">
+                    <input type="radio" name="decision" value="{{ option.value }}" {{ 'checked' if review.review_decision == option.value else '' }} required>
+                    <span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span>
+                  </label>
+                {% endfor %}
+              </div>
+
+              <div class="feedback-core-grid">
+                <label>Suggested guidance quality
+                  <select name="guidance_rating">
+                    <option value="">Not rated</option>
+                    {% for option in guidance_ratings %}
+                      <option value="{{ option.value }}" {{ 'selected' if review.guidance_rating == option.value else '' }}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Corrected role <span>(optional)</span>
+                  <input type="text" name="corrected_role" value="{{ review.corrected_role }}" placeholder="Example: resolution-data provider">
+                </label>
+                <label>Better owner <span>(optional)</span>
+                  <input type="text" name="suggested_owner" value="{{ review.suggested_owner }}" placeholder="Example: Data Licensing">
+                </label>
+              </div>
+
+              <details class="feedback-details" {{ 'open' if review.review_reason_codes or review.review_note else '' }}>
+                <summary>Add reasons or notes (optional)</summary>
+                <div class="reason-groups">
+                  {% for group in review_reason_groups %}
+                    <fieldset>
+                      <legend>{{ group.label }}</legend>
+                      {% for code, label in group['items'] %}
+                        <label class="reason-option">
+                          <input type="checkbox" name="reason_codes" value="{{ code }}" {{ 'checked' if code in review.review_reason_codes else '' }}>
+                          <span>{{ label }}</span>
+                        </label>
+                      {% endfor %}
+                    </fieldset>
+                  {% endfor %}
+                </div>
+                <label class="feedback-note">Reviewer note
+                  <textarea name="note" rows="3" maxlength="4000" placeholder="What would make this more or less actionable?">{{ review.review_note }}</textarea>
+                </label>
+              </details>
+
+              {% if review.acknowledged_at and not review.review_decision %}
+                <p class="legacy-note">This match was marked reviewed before structured feedback existed. Saving an assessment will replace the legacy-only state.</p>
+              {% endif %}
+              <div class="feedback-actions">
+                <button class="save-feedback-button" type="submit">{{ 'Update assessment' if review.review_decision else 'Save assessment' }}</button>
+              </div>
+            </form>
           </section>
         {% endfor %}
 
-        <p class="guidance-limit">This brief cannot determine trader intent, identify privileged access, or prove influence or misconduct from public market metadata alone.</p>
+        <p class="guidance-limit">This brief cannot determine trader intent, identify privileged access, or prove influence or misconduct from public market metadata alone. Reviewer labels are calibration data, not ground truth.</p>
+      </details>
+    {% elif item.reviewed_count %}
+      <details class="contract-review historical-review">
+        <summary>Historical reviewer assessment</summary>
+        {% for review in item.reviews if review.review_decision or review.acknowledged_at %}
+          <div class="historical-assessment">
+            <strong>{{ review.organization }}</strong>
+            {% if review.review_decision %}
+              <span class="assessment-badge decision-{{ review.review_decision }}">{{ review_decision_labels.get(review.review_decision, review.review_decision | replace('_', ' ') | title) }}</span>
+            {% else %}
+              <span class="assessment-badge legacy-reviewed">Legacy reviewed</span>
+            {% endif %}
+            {% if review.review_note %}<p>{{ review.review_note }}</p>{% endif %}
+          </div>
+        {% endfor %}
       </details>
     {% endif %}
   </article>
@@ -156,7 +245,7 @@
         <article class="stat-card"><span>Active market records indexed</span><strong>{{ stats.markets }}</strong></article>
         <article class="stat-card"><span>Active candidate contracts</span><strong>{{ stats.matches }}</strong></article>
         <article class="stat-card"><span>High-priority active contracts</span><strong>{{ stats.high_risk }}</strong></article>
-        <article class="stat-card"><span>New since baseline</span><strong>{{ stats.unacknowledged }}</strong></article>
+        <article class="stat-card"><span>Unreviewed active contracts</span><strong>{{ stats.unacknowledged }}</strong></article>
       {% else %}
         <article class="stat-card"><span>Archived market records</span><strong>{{ stats.markets }}</strong></article>
         <article class="stat-card"><span>Archived candidate contracts</span><strong>{{ stats.matches }}</strong></article>
@@ -165,6 +254,63 @@
       {% endif %}
     </section>
 
+    {% if view == 'active' %}
+      <section class="panel calibration-panel">
+        <div class="panel-heading calibration-heading">
+          <div>
+            <p class="eyebrow">Reviewer calibration</p>
+            <h3>Measure useful signal—not just matches</h3>
+            <p class="panel-subcopy">Each assessment applies to one profile’s relationship to a contract. These labels help reveal which profiles, risk pathways, and recommended actions create operational value.</p>
+          </div>
+          <span class="calibration-caveat">Reviewer labels are directional, not ground truth.</span>
+        </div>
+        <div class="calibration-grid">
+          <div><span>Structured reviews</span><strong>{{ calibration.reviewed }}</strong><small>{{ calibration.unreviewed }} unreviewed profile matches</small></div>
+          <div><span>Actionable</span><strong>{{ calibration.decision_counts.actionable }}</strong><small>{{ (calibration.actionable_or_monitor_rate ~ '% actionable or monitor') if calibration.reviewed else 'No structured decisions yet' }}</small></div>
+          <div><span>Monitor</span><strong>{{ calibration.decision_counts.monitor }}</strong><small>{{ calibration.decision_counts.informational }} informational</small></div>
+          <div><span>False positives</span><strong>{{ calibration.decision_counts.false_positive }}</strong><small>{{ (calibration.false_positive_rate ~ '% of structured reviews') if calibration.reviewed else 'No structured decisions yet' }}</small></div>
+          <div><span>Guidance positive</span><strong>{{ (calibration.guidance_positive_rate ~ '%') if calibration.guidance_reviewed else '—' }}</strong><small>{{ calibration.guidance_reviewed }} guidance ratings</small></div>
+        </div>
+        {% if calibration.reviewed or calibration.legacy_reviewed %}
+          <details class="calibration-details">
+            <summary>View calibration by profile and risk pathway</summary>
+            <div class="calibration-tables">
+              <div class="table-wrap">
+                <h4>By profile</h4>
+                <table>
+                  <thead><tr><th>Profile</th><th>Reviewed</th><th>Actionable</th><th>Monitor</th><th>Info</th><th>False +</th><th>Unreviewed</th></tr></thead>
+                  <tbody>
+                    {% for row in calibration.profiles %}
+                      <tr>
+                        <td>{{ row.organization }}</td><td>{{ row.reviewed }}</td><td>{{ row.actionable }}</td><td>{{ row.monitor }}</td><td>{{ row.informational }}</td><td>{{ row.false_positive }}</td><td>{{ row.unreviewed }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% if calibration.pathways %}
+                <div class="table-wrap">
+                  <h4>By risk pathway</h4>
+                  <table>
+                    <thead><tr><th>Pathway</th><th>Reviewed</th><th>Actionable</th><th>Monitor</th><th>Info</th><th>False +</th></tr></thead>
+                    <tbody>
+                      {% for row in calibration.pathways %}
+                        <tr>
+                          <td>{{ row.category | replace('_', ' ') | title }}</td><td>{{ row.reviewed }}</td><td>{{ row.actionable }}</td><td>{{ row.monitor }}</td><td>{{ row.informational }}</td><td>{{ row.false_positive }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+            </div>
+          </details>
+        {% else %}
+          <p class="calibration-empty">No structured assessments yet. Open a contract, review one profile relationship, and choose Actionable, Monitor, Informational, or False positive.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
     <section class="panel">
       <div class="panel-heading">
         <div>
@@ -172,7 +318,7 @@
           <h3>{{ 'Active candidate contracts' if view == 'active' else 'Archived contracts' }}</h3>
           <p class="panel-subcopy">
             {% if view == 'active' %}
-              Only currently open or upcoming contracts appear here. Exact duplicates are collapsed, multi-profile matches share one card, and related thresholds or dates are grouped.
+              Only currently open or upcoming contracts appear here. Review each profile relationship separately so the system can learn which matches are actionable, worth monitoring, informational, or false positives.
             {% else %}
               Historical records are available for research and backtesting only. They have no review or acknowledgement controls.
             {% endif %}
@@ -180,6 +326,7 @@
         </div>
         <div class="queue-meta">
           <span>Showing {{ displayed_contract_count }}{% if filtered_contract_count != displayed_contract_count %} of {{ filtered_contract_count }} filtered{% endif %} · {{ stats.matches }} total {{ 'active' if view == 'active' else 'archived' }} contracts</span>
+          {% if view == 'active' %}<span>{{ calibration.unreviewed }} profile match{{ '' if calibration.unreviewed == 1 else 'es' }} still unreviewed</span>{% endif %}
           <span class="last-scan">Last scan: {{ stats.last_scan | date }}</span>
         </div>
       </div>
@@ -223,18 +370,21 @@
           </select>
         </label>
         {% if view == 'active' %}
-          <label>Review state
-            <select name="alert_state" data-auto-submit>
-              <option value="">All</option>
-              {% for item in ['pending', 'sent', 'console_only', 'failed', 'source_error', 'baseline', 'historical', 'acknowledged'] %}
-                <option value="{{ item }}" {{ 'selected' if filters.alert_state == item else '' }}>{{ item | replace('_', ' ') | title }}</option>
+          <label>Reviewer decision
+            <select name="review_decision" data-auto-submit>
+              <option value="">All assessments</option>
+              <option value="unreviewed" {{ 'selected' if filters.review_decision == 'unreviewed' else '' }}>Unreviewed</option>
+              {% for item in review_decisions %}
+                <option value="{{ item.value }}" {{ 'selected' if filters.review_decision == item.value else '' }}>{{ item.label }}</option>
               {% endfor %}
+              <option value="legacy_reviewed" {{ 'selected' if filters.review_decision == 'legacy_reviewed' else '' }}>Legacy reviewed</option>
             </select>
           </label>
         {% endif %}
         <label>Sort by
           <select name="sort" data-auto-submit>
             <option value="priority" {{ 'selected' if filters.sort == 'priority' else '' }}>Highest priority</option>
+            {% if view == 'active' %}<option value="review" {{ 'selected' if filters.sort == 'review' else '' }}>Unreviewed first</option>{% endif %}
             <option value="closing" {{ 'selected' if filters.sort == 'closing' else '' }}>Closing soonest</option>
             <option value="volume" {{ 'selected' if filters.sort == 'volume' else '' }}>Highest volume</option>
             <option value="newest" {{ 'selected' if filters.sort == 'newest' else '' }}>Newest match</option>

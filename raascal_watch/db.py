@@ -14,6 +14,7 @@ from .market_view import (
     event_group_identity,
 )
 from .models import MarketRecord, MatchResult, ScanSourceSummary
+from .review import normalize_reason_codes
 from .text import isoformat, parse_datetime, utcnow
 
 
@@ -100,6 +101,21 @@ CREATE INDEX IF NOT EXISTS idx_matches_severity
     ON matches(severity, risk_score DESC);
 CREATE INDEX IF NOT EXISTS idx_matches_state
     ON matches(alert_state, first_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS review_feedback (
+    match_id INTEGER PRIMARY KEY REFERENCES matches(id) ON DELETE CASCADE,
+    decision TEXT NOT NULL,
+    reason_codes_json TEXT NOT NULL DEFAULT '[]',
+    guidance_rating TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    corrected_role TEXT NOT NULL DEFAULT '',
+    suggested_owner TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_feedback_decision
+    ON review_feedback(decision, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS source_state (
     source TEXT PRIMARY KEY,
@@ -496,6 +512,234 @@ class Database:
             )
             return cursor.rowcount > 0
 
+    def save_review_feedback(
+        self,
+        match_id: int,
+        *,
+        decision: str,
+        reason_codes: list[str],
+        guidance_rating: str | None,
+        note: str,
+        corrected_role: str,
+        suggested_owner: str,
+        at: datetime,
+    ) -> dict[str, Any] | None:
+        """Create or update the reviewer assessment for one profile match.
+
+        A saved assessment is a completed review, so the older acknowledgement
+        fields are updated for backward compatibility. The richer feedback row
+        remains the source of truth for calibration.
+        """
+
+        if not self.market_is_active_for_match(match_id):
+            return None
+        timestamp = isoformat(at)
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM matches WHERE id = ?", (match_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                INSERT INTO review_feedback(
+                    match_id, decision, reason_codes_json, guidance_rating, note,
+                    corrected_role, suggested_owner, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(match_id) DO UPDATE SET
+                    decision = excluded.decision,
+                    reason_codes_json = excluded.reason_codes_json,
+                    guidance_rating = excluded.guidance_rating,
+                    note = excluded.note,
+                    corrected_role = excluded.corrected_role,
+                    suggested_owner = excluded.suggested_owner,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    match_id,
+                    decision,
+                    _json(normalize_reason_codes(reason_codes)),
+                    guidance_rating,
+                    note[:4000],
+                    corrected_role[:300],
+                    suggested_owner[:300],
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE matches
+                SET acknowledged_at = ?, alert_state = 'acknowledged'
+                WHERE id = ?
+                """,
+                (timestamp, match_id),
+            )
+        return self.get_match(match_id)
+
+    def market_is_active_for_match(self, match_id: int) -> bool:
+        scope_sql, scope_params = _market_scope_clause("active")
+        with self.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT 1
+                FROM matches mt
+                JOIN markets m ON m.id = mt.market_id
+                WHERE mt.id = ? AND {scope_sql}
+                """,
+                (match_id, *scope_params),
+            ).fetchone()
+        return row is not None
+
+    def list_review_feedback(
+        self, *, view: str = "all", include_demo: bool = False, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        scope_sql, scope_params = _market_scope_clause(view)
+        demo_clause = "" if include_demo else "AND m.source <> 'demo'"
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    rf.match_id, rf.decision, rf.reason_codes_json,
+                    rf.guidance_rating, rf.note, rf.corrected_role,
+                    rf.suggested_owner, rf.created_at, rf.updated_at,
+                    mt.organization, mt.categories_json, mt.risk_score, mt.severity,
+                    mt.match_basis, m.id AS market_id, m.source, m.external_id,
+                    m.title, m.url, m.closes_at, m.status
+                FROM review_feedback rf
+                JOIN matches mt ON mt.id = rf.match_id
+                JOIN markets m ON m.id = mt.market_id
+                WHERE {scope_sql} {demo_clause}
+                ORDER BY rf.updated_at DESC
+                LIMIT ?
+                """,
+                (*scope_params, max(1, min(limit, 50000))),
+            ).fetchall()
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["reason_codes"] = _loads(item.pop("reason_codes_json"), [])
+            item["categories"] = _loads(item.pop("categories_json"), [])
+            output.append(item)
+        return output
+
+    def feedback_summary(
+        self, *, view: str = "active", include_demo: bool = False
+    ) -> dict[str, Any]:
+        """Return calibration counts from reviewer decisions, by profile/pathway."""
+
+        scope_sql, scope_params = _market_scope_clause(view)
+        demo_clause = "" if include_demo else "AND m.source <> 'demo'"
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    mt.id AS match_id, mt.organization, mt.categories_json,
+                    mt.acknowledged_at, rf.decision, rf.guidance_rating
+                FROM matches mt
+                JOIN markets m ON m.id = mt.market_id
+                LEFT JOIN review_feedback rf ON rf.match_id = mt.id
+                WHERE {scope_sql} {demo_clause}
+                """,
+                tuple(scope_params),
+            ).fetchall()
+
+        decision_counts = {
+            "actionable": 0,
+            "monitor": 0,
+            "informational": 0,
+            "false_positive": 0,
+        }
+        guidance_counts = {"useful": 0, "partly_useful": 0, "not_useful": 0}
+        by_profile: dict[str, dict[str, Any]] = {}
+        by_category: dict[str, dict[str, Any]] = {}
+        legacy_reviewed = 0
+        unreviewed = 0
+
+        for row in rows:
+            organization = str(row["organization"])
+            profile = by_profile.setdefault(
+                organization,
+                {
+                    "organization": organization,
+                    "total": 0,
+                    "reviewed": 0,
+                    "legacy_reviewed": 0,
+                    "unreviewed": 0,
+                    **{key: 0 for key in decision_counts},
+                },
+            )
+            profile["total"] += 1
+            decision = row["decision"]
+            if decision in decision_counts:
+                decision_counts[str(decision)] += 1
+                profile["reviewed"] += 1
+                profile[str(decision)] += 1
+                guidance = row["guidance_rating"]
+                if guidance in guidance_counts:
+                    guidance_counts[str(guidance)] += 1
+                for category in _loads(row["categories_json"], []):
+                    clean = str(category)
+                    pathway = by_category.setdefault(
+                        clean,
+                        {
+                            "category": clean,
+                            "reviewed": 0,
+                            **{key: 0 for key in decision_counts},
+                        },
+                    )
+                    pathway["reviewed"] += 1
+                    pathway[str(decision)] += 1
+            elif row["acknowledged_at"]:
+                legacy_reviewed += 1
+                profile["legacy_reviewed"] += 1
+            else:
+                unreviewed += 1
+                profile["unreviewed"] += 1
+
+        reviewed = sum(decision_counts.values())
+        guidance_reviewed = sum(guidance_counts.values())
+        actionable_or_monitor = decision_counts["actionable"] + decision_counts["monitor"]
+        total = len(rows)
+
+        profiles = sorted(
+            by_profile.values(),
+            key=lambda item: (-int(item["reviewed"]), -int(item["total"]), item["organization"]),
+        )
+        pathways = sorted(
+            by_category.values(),
+            key=lambda item: (-int(item["reviewed"]), item["category"]),
+        )
+        return {
+            "total_profile_matches": total,
+            "reviewed": reviewed,
+            "legacy_reviewed": legacy_reviewed,
+            "unreviewed": unreviewed,
+            "decision_counts": decision_counts,
+            "guidance_counts": guidance_counts,
+            "actionable_or_monitor_rate": (
+                round(actionable_or_monitor / reviewed * 100, 1) if reviewed else 0.0
+            ),
+            "false_positive_rate": (
+                round(decision_counts["false_positive"] / reviewed * 100, 1)
+                if reviewed
+                else 0.0
+            ),
+            "guidance_positive_rate": (
+                round(
+                    (guidance_counts["useful"] + guidance_counts["partly_useful"])
+                    / guidance_reviewed
+                    * 100,
+                    1,
+                )
+                if guidance_reviewed
+                else 0.0
+            ),
+            "guidance_reviewed": guidance_reviewed,
+            "profiles": profiles,
+            "pathways": pathways,
+        }
+
     def update_match_analysis(self, market_id: int, result: MatchResult) -> bool:
         """Refresh scoring and review guidance without changing source-seen timestamps."""
         with self.connect() as connection:
@@ -742,6 +986,7 @@ class Database:
         severity: str | None = None,
         source: str | None = None,
         alert_state: str | None = None,
+        review_decision: str | None = None,
         include_demo: bool = False,
         view: str = "active",
         limit: int = 200,
@@ -771,6 +1016,14 @@ class Database:
         if alert_state:
             clauses.append("mt.alert_state = ?")
             params.append(alert_state)
+        if review_decision:
+            if review_decision == "unreviewed":
+                clauses.append("rf.match_id IS NULL AND mt.acknowledged_at IS NULL")
+            elif review_decision == "legacy_reviewed":
+                clauses.append("rf.match_id IS NULL AND mt.acknowledged_at IS NOT NULL")
+            else:
+                clauses.append("rf.decision = ?")
+                params.append(review_decision)
         where = f"WHERE {' AND '.join(clauses)}"
         return self._query_matches(where, tuple(params), limit=max(1, min(limit, 1000)))
 
@@ -781,6 +1034,7 @@ class Database:
         severity: str | None = None,
         source: str | None = None,
         alert_state: str | None = None,
+        review_decision: str | None = None,
         include_demo: bool = False,
         view: str = "active",
         sort: str = "priority",
@@ -796,7 +1050,7 @@ class Database:
 
         normalized_view = (view or "active").strip().lower()
         normalized_sort = (sort or "priority").strip().lower()
-        if normalized_sort not in {"priority", "closing", "volume", "newest"}:
+        if normalized_sort not in {"priority", "review", "closing", "volume", "newest"}:
             normalized_sort = "priority"
 
         scope_sql, scope_params = _market_scope_clause(normalized_view)
@@ -866,6 +1120,14 @@ class Database:
                     "alert_state": row["alert_state"],
                     "notified_at": row["notified_at"],
                     "acknowledged_at": row["acknowledged_at"],
+                    "review_decision": row.get("review_decision"),
+                    "review_reason_codes": row.get("review_reason_codes", []),
+                    "guidance_rating": row.get("guidance_rating"),
+                    "review_note": row.get("review_note") or "",
+                    "corrected_role": row.get("corrected_role") or "",
+                    "suggested_owner": row.get("suggested_owner") or "",
+                    "feedback_created_at": row.get("feedback_created_at"),
+                    "feedback_updated_at": row.get("feedback_updated_at"),
                 }
             )
 
@@ -880,6 +1142,16 @@ class Database:
                     return False
                 if alert_state and review["alert_state"] != alert_state:
                     return False
+                if review_decision:
+                    explicit = review.get("review_decision")
+                    if review_decision == "unreviewed":
+                        if explicit or review.get("acknowledged_at"):
+                            return False
+                    elif review_decision == "legacy_reviewed":
+                        if explicit or not review.get("acknowledged_at"):
+                            return False
+                    elif explicit != review_decision:
+                        return False
                 return True
 
             if not any(review_matches_filters(review) for review in reviews):
@@ -910,8 +1182,18 @@ class Database:
             contract["alert_states"] = list(
                 dict.fromkeys(str(item["alert_state"]) for item in reviews)
             )
-            contract["all_reviewed"] = all(
-                bool(item["acknowledged_at"]) for item in reviews
+            contract["review_total"] = len(reviews)
+            contract["reviewed_count"] = sum(
+                1
+                for item in reviews
+                if item.get("review_decision") or item.get("acknowledged_at")
+            )
+            contract["explicit_review_count"] = sum(
+                1 for item in reviews if item.get("review_decision")
+            )
+            contract["all_reviewed"] = (
+                contract["review_total"] > 0
+                and contract["reviewed_count"] == contract["review_total"]
             )
             contract["reviewable"] = normalized_view == "active"
             contract["display_state"] = (
@@ -921,9 +1203,13 @@ class Database:
                     "reviewed"
                     if contract["all_reviewed"]
                     else (
-                        "baseline"
-                        if set(contract["alert_states"]) == {"baseline"}
-                        else "needs review"
+                        "in review"
+                        if contract["reviewed_count"]
+                        else (
+                            "baseline"
+                            if set(contract["alert_states"]) == {"baseline"}
+                            else "needs review"
+                        )
                     )
                 )
             )
@@ -939,6 +1225,18 @@ class Database:
             contracts.append(contract)
 
         def sort_key(contract: dict[str, Any]) -> tuple[Any, ...]:
+            if normalized_sort == "review":
+                review_bucket = (
+                    0
+                    if contract["reviewed_count"] == 0
+                    else (2 if contract["all_reviewed"] else 1)
+                )
+                return (
+                    review_bucket,
+                    -_SEVERITY_RANK.get(str(contract["severity"]), 0),
+                    -int(contract["risk_score"]),
+                    contract["top_match_first_seen_at"],
+                )
             if normalized_sort == "closing":
                 return (
                     contract["closes_at"] is None,
@@ -1016,6 +1314,12 @@ class Database:
                     mt.first_seen_at AS match_first_seen_at,
                     mt.last_seen_at AS match_last_seen_at,
                     mt.alert_state, mt.notified_at, mt.acknowledged_at,
+                    rf.decision AS review_decision,
+                    rf.reason_codes_json AS review_reason_codes_json,
+                    rf.guidance_rating, rf.note AS review_note,
+                    rf.corrected_role, rf.suggested_owner,
+                    rf.created_at AS feedback_created_at,
+                    rf.updated_at AS feedback_updated_at,
                     m.id AS market_id, m.source, m.external_id, m.title,
                     m.description, m.url, m.status, m.source_created_at,
                     m.closes_at, m.probability, m.volume, m.volume_24h,
@@ -1023,6 +1327,7 @@ class Database:
                     m.last_seen_at, m.raw_json
                 FROM matches mt
                 JOIN markets m ON m.id = mt.market_id
+                LEFT JOIN review_feedback rf ON rf.match_id = mt.id
                 {where}
                 ORDER BY
                     CASE mt.severity
@@ -1052,6 +1357,9 @@ class Database:
             ):
                 clean_name = field.removesuffix("_json")
                 item[clean_name] = _loads(item.pop(field), [])
+            item["review_reason_codes"] = _loads(
+                item.pop("review_reason_codes_json", None), []
+            )
             item["raw"] = _loads(item.pop("raw_json"), {})
             output.append(item)
         return output
@@ -1084,9 +1392,10 @@ class Database:
                 SELECT COUNT(DISTINCT m.id) AS count
                 FROM matches mt
                 JOIN markets m ON m.id = mt.market_id
+                LEFT JOIN review_feedback rf ON rf.match_id = mt.id
                 WHERE {scope_sql} {demo_clause}
+                  AND rf.match_id IS NULL
                   AND mt.acknowledged_at IS NULL
-                  AND mt.alert_state NOT IN ('baseline', 'historical', 'acknowledged')
                 """,
                 tuple(scope_params),
             ).fetchone()["count"]
@@ -1190,6 +1499,7 @@ class Database:
         """Used by tests and explicit local resets."""
         with self.connect() as connection:
             connection.execute("DELETE FROM notification_log")
+            connection.execute("DELETE FROM review_feedback")
             connection.execute("DELETE FROM matches")
             connection.execute("DELETE FROM markets")
             connection.execute("DELETE FROM source_state")

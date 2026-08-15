@@ -63,9 +63,28 @@ The Kalshi collector directly queries series referenced by dependency rules, so 
 
 The default page shows only active contracts. Closed or expired contracts are retained under the separate **Archive** tab and have no review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
 
+## Reviewer feedback and calibration
+
+Open **Review guidance and record an assessment** on an active contract. The same contract may have several matched profiles, and each profile is assessed separately. Choose:
+
+- **Actionable**
+- **Monitor**
+- **Informational**
+- **False positive**
+
+Optional fields let you explain the decision, rate the suggested guidance, correct the inferred role, propose a better owner, and add a note. The calibration panel summarizes review quality by profile and risk pathway.
+
+Use the **Reviewer decision** filter or **Unreviewed first** sorting to work through the queue. Historical assessments remain visible after a contract moves to Archive, but archived records cannot be edited as current work.
+
+Export feedback with:
+
+```bash
+raascal-watch export-feedback --format csv --view all --output ./exports/reviewer_feedback.csv
+```
+
 ## Contract-specific review guidance
 
-Open **Review this active contract** on a current result to see the likely organization role, why it surfaced, questions to answer, suggested owners, and first review steps tailored to that contract's title, rules, source, probability, volume, and close time.
+Open **Review guidance and record an assessment** on a current result to see the likely organization role, why it surfaced, questions to answer, suggested owners, and first review steps tailored to that contract's title, rules, source, probability, volume, and close time.
 
 To regenerate this guidance for records already in the local database without another API scan:
 

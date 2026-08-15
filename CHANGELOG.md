@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 — Reviewer feedback and calibration
+
+- Added structured profile-match decisions: **Actionable**, **Monitor**, **Informational**, and **False positive**.
+- Added optional reason tags, guidance-usefulness ratings, corrected-role fields, better-owner suggestions, and reviewer notes.
+- Added a persistent `review_feedback` SQLite table that migrates into existing local databases without resetting market history.
+- Replaced the binary card-level review control with profile-level assessment progress so one multi-organization contract can receive different decisions for each affected party.
+- Added reviewer-decision filters and **Unreviewed first** sorting.
+- Added a calibration panel with reviewed/unreviewed counts, actionable-or-monitor rate, false-positive rate, guidance usefulness, and breakdowns by profile and risk pathway.
+- Preserved structured assessments when contracts move to Archive while removing editing controls from historical records.
+- Added `/api/matches/{match_id}/feedback`, `/api/calibration`, and `/api/feedback` endpoints.
+- Added `raascal-watch export-feedback` and included feedback fields in the standard CSV/JSON match export.
+- Retained legacy acknowledgements separately so earlier review work is not falsely treated as structured calibration data.
+- Added automated coverage for schema migration, API validation, decision filtering, multi-profile progress, archive preservation, calibration metrics, export, and unreviewed-first sorting.
+
 ## 0.5.0 — Theme and dependency-aware flight-cancellation monitoring
 
 - Added **Flight cancellation markets** as a monitored theme so cancellation contracts can surface without assuming one organization owns the result.

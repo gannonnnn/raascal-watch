@@ -237,8 +237,8 @@ def test_dashboard_routes_keep_expired_contracts_out_of_review(tmp_path: Path, m
     assert active.status_code == 200
     assert "web-active" in active.text
     assert "web-expired" not in active.text
-    assert "Review this active contract" in active.text
+    assert "Review guidance and record an assessment" in active.text
     assert archive.status_code == 200
     assert "web-expired" in archive.text
-    assert "Review this active contract" not in archive.text
+    assert "Review guidance and record an assessment" not in archive.text
     assert "Mark reviewed" not in archive.text

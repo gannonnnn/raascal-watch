@@ -14,9 +14,20 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from . import __version__
 from .db import Database
+from .review import (
+    GUIDANCE_RATING_LABELS,
+    GUIDANCE_RATING_VALUES,
+    GUIDANCE_RATINGS,
+    REVIEW_DECISION_LABELS,
+    REVIEW_DECISION_VALUES,
+    REVIEW_DECISIONS,
+    REVIEW_REASON_GROUPS,
+    normalize_reason_codes,
+)
 from .scanner import Scanner, ScannerBusyError
 from .settings import get_settings
 from .text import utcnow
@@ -35,7 +46,7 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 
 _ALLOWED_VIEWS = {"active", "archive"}
-_ALLOWED_SORTS = {"priority", "closing", "volume", "newest"}
+_ALLOWED_SORTS = {"priority", "review", "closing", "volume", "newest"}
 
 
 def _format_date(value: str | None) -> str:
@@ -77,6 +88,11 @@ def _normalize_sort(value: str | None) -> str:
     return clean if clean in _ALLOWED_SORTS else "priority"
 
 
+def _normalize_scope_view(value: str | None, *, default: str = "active") -> str:
+    clean = (value or default).strip().lower()
+    return clean if clean in {"active", "archive", "all"} else default
+
+
 def _dashboard_url(request: Request, **changes: str | None) -> str:
     params = dict(request.query_params)
     for key, value in changes.items():
@@ -86,6 +102,15 @@ def _dashboard_url(request: Request, **changes: str | None) -> str:
             params[key] = str(value)
     query = urlencode(params)
     return f"/?{query}" if query else "/"
+
+
+class ReviewFeedbackPayload(BaseModel):
+    decision: str
+    reason_codes: list[str] = Field(default_factory=list, max_length=20)
+    guidance_rating: str | None = None
+    note: str = Field(default="", max_length=4000)
+    corrected_role: str = Field(default="", max_length=300)
+    suggested_owner: str = Field(default="", max_length=300)
 
 
 async def _scheduled_scans() -> None:
@@ -132,6 +157,7 @@ async def dashboard(
     severity: str | None = Query(default=None),
     source: str | None = Query(default=None),
     alert_state: str | None = Query(default=None),
+    review_decision: str | None = Query(default=None),
     sort: str = Query(default="priority"),
     view: str = Query(default="active"),
     include_demo: bool = Query(default=False),
@@ -143,11 +169,15 @@ async def dashboard(
     # Normal review is active-only. Historical contracts remain available in an
     # explicit archive but cannot be acknowledged or reviewed as current work.
     stats = database.dashboard_stats(include_demo=include_demo, view=normalized_view)
+    calibration = database.feedback_summary(
+        include_demo=include_demo, view=normalized_view
+    )
     result = database.list_contract_groups(
         organization=organization,
         severity=severity,
         source=source,
         alert_state=alert_state,
+        review_decision=review_decision,
         include_demo=include_demo,
         view=normalized_view,
         sort=normalized_sort,
@@ -185,13 +215,15 @@ async def dashboard(
         "severity": severity or "",
         "source": source or "",
         "alert_state": alert_state or "",
+        "review_decision": review_decision or "",
         "sort": normalized_sort,
     }
     chip_labels = {
         "organization": "Profile",
         "severity": "Severity",
         "source": "Source",
-        "alert_state": "State",
+        "alert_state": "Delivery state",
+        "review_decision": "Reviewer decision",
     }
     active_filter_chips = [
         {
@@ -211,6 +243,7 @@ async def dashboard(
         "severity": None,
         "source": None,
         "alert_state": None,
+        "review_decision": None,
         "sort": None,
         "view": normalized_view,
     }
@@ -220,6 +253,7 @@ async def dashboard(
         name="index.html",
         context={
             "stats": stats,
+            "calibration": calibration,
             "contract_groups": result["groups"],
             "displayed_contract_count": len(result["contracts"]),
             "filtered_contract_count": result["total"],
@@ -249,8 +283,21 @@ async def dashboard(
             "view": normalized_view,
             "filters": filter_values,
             "active_filter_chips": active_filter_chips,
-            "active_url": _dashboard_url(request, view="active", alert_state=None),
-            "archive_url": _dashboard_url(request, view="archive", alert_state=None),
+            "review_decisions": REVIEW_DECISIONS,
+            "review_decision_labels": REVIEW_DECISION_LABELS,
+            "review_reason_groups": REVIEW_REASON_GROUPS,
+            "guidance_ratings": GUIDANCE_RATINGS,
+            "guidance_rating_labels": GUIDANCE_RATING_LABELS,
+            "active_url": _dashboard_url(
+                request, view="active", alert_state=None, review_decision=None
+            ),
+            "archive_url": _dashboard_url(
+                request,
+                view="archive",
+                alert_state=None,
+                review_decision=None,
+                sort="priority",
+            ),
             "clear_url": _dashboard_url(request, **clear_params),
         },
     )
@@ -262,6 +309,7 @@ async def api_matches(
     severity: str | None = None,
     source: str | None = None,
     alert_state: str | None = None,
+    review_decision: str | None = None,
     view: str = "active",
     include_demo: bool = False,
     limit: int = Query(default=200, ge=1, le=1000),
@@ -271,6 +319,7 @@ async def api_matches(
         severity=severity,
         source=source,
         alert_state=alert_state,
+        review_decision=review_decision,
         view=_normalize_view(view),
         include_demo=include_demo,
         limit=limit,
@@ -283,6 +332,7 @@ async def api_contracts(
     severity: str | None = None,
     source: str | None = None,
     alert_state: str | None = None,
+    review_decision: str | None = None,
     sort: str = "priority",
     view: str = "active",
     include_demo: bool = False,
@@ -293,6 +343,7 @@ async def api_contracts(
         severity=severity,
         source=source,
         alert_state=alert_state,
+        review_decision=review_decision,
         sort=_normalize_sort(sort),
         view=_normalize_view(view),
         include_demo=include_demo,
@@ -309,6 +360,67 @@ async def api_scan() -> JSONResponse:
     except WatchlistError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JSONResponse(jsonable_encoder(asdict(summary)))
+
+
+@app.post("/api/matches/{match_id}/feedback")
+async def save_match_feedback(
+    match_id: int, payload: ReviewFeedbackPayload
+) -> dict[str, Any]:
+    match = database.get_match(match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    if not database.market_is_active_for_match(match_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Archived contracts cannot receive current reviewer feedback.",
+        )
+
+    decision = payload.decision.strip().lower()
+    if decision not in REVIEW_DECISION_VALUES:
+        raise HTTPException(status_code=422, detail="Unsupported reviewer decision")
+    guidance_rating = (payload.guidance_rating or "").strip().lower() or None
+    if guidance_rating and guidance_rating not in GUIDANCE_RATING_VALUES:
+        raise HTTPException(status_code=422, detail="Unsupported guidance rating")
+
+    updated = database.save_review_feedback(
+        match_id,
+        decision=decision,
+        reason_codes=normalize_reason_codes(payload.reason_codes),
+        guidance_rating=guidance_rating,
+        note=payload.note.strip(),
+        corrected_role=payload.corrected_role.strip(),
+        suggested_owner=payload.suggested_owner.strip(),
+        at=utcnow(),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    return {
+        "ok": True,
+        "match_id": match_id,
+        "decision": updated.get("review_decision"),
+        "decision_label": REVIEW_DECISION_LABELS.get(
+            str(updated.get("review_decision")), "Reviewed"
+        ),
+        "calibration": database.feedback_summary(view="active"),
+    }
+
+
+@app.get("/api/calibration")
+async def calibration(view: str = "active") -> dict[str, Any]:
+    return database.feedback_summary(
+        view=_normalize_scope_view(view), include_demo=False
+    )
+
+
+@app.get("/api/feedback")
+async def feedback_export(
+    view: str = "all", limit: int = Query(default=5000, ge=1, le=50000)
+) -> list[dict[str, Any]]:
+    return database.list_review_feedback(
+        view=_normalize_scope_view(view, default="all"),
+        include_demo=False,
+        limit=limit,
+    )
 
 
 @app.post("/api/matches/{match_id}/acknowledge")
@@ -344,12 +456,15 @@ async def acknowledge_contract(market_id: int) -> dict[str, Any]:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     stats = database.dashboard_stats(include_demo=False, view="active")
+    feedback = database.feedback_summary(include_demo=False, view="active")
     return {
         "status": "ok",
         "scanner_running": scanner.is_running,
         "last_scan": stats["last_scan"],
         "active_candidate_contracts": stats["matches"],
         "archived_candidate_contracts": stats["archive_matches"],
+        "reviewed_profile_matches": feedback["reviewed"],
+        "unreviewed_profile_matches": feedback["unreviewed"],
         "enabled_sources": [collector.name for collector in scanner.collectors],
         "database": str(settings.db_path),
     }
