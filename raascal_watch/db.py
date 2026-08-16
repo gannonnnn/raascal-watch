@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -13,6 +14,7 @@ from .market_view import (
     clean_display_title,
     event_group_identity,
 )
+from .materiality import GATE_RANK, aggregate_materiality, apply_market_movement
 from .models import MarketRecord, MatchResult, ScanSourceSummary
 from .review import normalize_reason_codes
 from .text import isoformat, parse_datetime, utcnow
@@ -90,6 +92,9 @@ CREATE TABLE IF NOT EXISTS matches (
     stakeholders_json TEXT NOT NULL DEFAULT '[]',
     actions_json TEXT NOT NULL DEFAULT '[]',
     incentive_map_json TEXT NOT NULL DEFAULT '{}',
+    risk_breakdown_json TEXT NOT NULL DEFAULT '{}',
+    materiality_json TEXT NOT NULL DEFAULT '{}',
+    dynamic_subjects_json TEXT NOT NULL DEFAULT '[]',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     alert_state TEXT NOT NULL DEFAULT 'new',
@@ -128,7 +133,9 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     volume_24h REAL,
     liquidity REAL,
     open_interest REAL,
-    status TEXT NOT NULL DEFAULT 'unknown'
+    status TEXT NOT NULL DEFAULT 'unknown',
+    closes_at TEXT,
+    rules_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_snapshots_market_time
@@ -206,6 +213,11 @@ def _loads(value: str | None, fallback: Any) -> Any:
         return fallback
 
 
+def _market_rules_hash(title: str, description: str) -> str:
+    payload = f"{title.strip()}\n{description.strip()}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 class Database:
     def __init__(self, path: Path):
         self.path = path
@@ -250,6 +262,36 @@ class Database:
                 "matches",
                 "incentive_map_json",
                 "TEXT NOT NULL DEFAULT '{}'",
+            )
+            self._ensure_column(
+                connection,
+                "matches",
+                "risk_breakdown_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            self._ensure_column(
+                connection,
+                "matches",
+                "materiality_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            self._ensure_column(
+                connection,
+                "matches",
+                "dynamic_subjects_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                connection,
+                "market_snapshots",
+                "closes_at",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "market_snapshots",
+                "rules_hash",
+                "TEXT",
             )
 
     @staticmethod
@@ -417,13 +459,15 @@ class Database:
         self, market: MarketRecord, seen_at: datetime
     ) -> tuple[int, bool]:
         seen = isoformat(seen_at)
+        closes_at = isoformat(market.closes_at)
+        rules_hash = _market_rules_hash(market.title, market.description)
         values = (
             market.title,
             market.description,
             market.url,
             market.status,
             isoformat(market.created_at),
-            isoformat(market.closes_at),
+            closes_at,
             market.probability,
             market.volume,
             market.volume_24h,
@@ -437,8 +481,8 @@ class Database:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, probability, volume, volume_24h, liquidity,
-                       open_interest, status
+                SELECT id, title, description, closes_at, probability, volume,
+                       volume_24h, liquidity, open_interest, status
                 FROM markets
                 WHERE source = ? AND external_id = ?
                 """,
@@ -470,6 +514,9 @@ class Database:
                         ("liquidity", market.liquidity),
                         ("open_interest", market.open_interest),
                         ("status", market.status),
+                        ("closes_at", closes_at),
+                        ("title", market.title),
+                        ("description", market.description),
                     )
                 )
                 if tracked_changed or prior_snapshot is None:
@@ -477,8 +524,8 @@ class Database:
                         """
                         INSERT INTO market_snapshots(
                             market_id, captured_at, probability, volume, volume_24h,
-                            liquidity, open_interest, status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            liquidity, open_interest, status, closes_at, rules_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             market_id,
@@ -489,6 +536,8 @@ class Database:
                             market.liquidity,
                             market.open_interest,
                             market.status,
+                            closes_at,
+                            rules_hash,
                         ),
                     )
                 return market_id, False
@@ -509,7 +558,7 @@ class Database:
                     market.url,
                     market.status,
                     isoformat(market.created_at),
-                    isoformat(market.closes_at),
+                    closes_at,
                     market.probability,
                     market.volume,
                     market.volume_24h,
@@ -525,8 +574,8 @@ class Database:
                 """
                 INSERT INTO market_snapshots(
                     market_id, captured_at, probability, volume, volume_24h,
-                    liquidity, open_interest, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    liquidity, open_interest, status, closes_at, rules_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     market_id,
@@ -537,6 +586,8 @@ class Database:
                     market.liquidity,
                     market.open_interest,
                     market.status,
+                    closes_at,
+                    rules_hash,
                 ),
             )
             return market_id, True
@@ -562,6 +613,9 @@ class Database:
             _json(result.stakeholders),
             _json(result.actions),
             _json(result.incentive_map),
+            _json(result.risk_breakdown),
+            _json(result.materiality),
+            _json(result.dynamic_subjects),
             seen,
             market_id,
             result.organization,
@@ -581,7 +635,8 @@ class Database:
                         categories_json = ?,
                         risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
                         review_questions_json = ?, stakeholders_json = ?,
-                        actions_json = ?, incentive_map_json = ?, last_seen_at = ?
+                        actions_json = ?, incentive_map_json = ?, risk_breakdown_json = ?,
+                        materiality_json = ?, dynamic_subjects_json = ?, last_seen_at = ?
                     WHERE market_id = ? AND organization = ?
                     """,
                     values,
@@ -594,8 +649,9 @@ class Database:
                     market_id, organization, matched_identity_terms_json,
                     matched_metric_terms_json, categories_json, risk_score,
                     severity, match_basis, roles_json, reasons_json, review_questions_json,
-                    stakeholders_json, actions_json, incentive_map_json, first_seen_at, last_seen_at, alert_state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stakeholders_json, actions_json, incentive_map_json, risk_breakdown_json,
+                    materiality_json, dynamic_subjects_json, first_seen_at, last_seen_at, alert_state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     market_id,
@@ -612,6 +668,9 @@ class Database:
                     _json(result.stakeholders),
                     _json(result.actions),
                     _json(result.incentive_map),
+                    _json(result.risk_breakdown),
+                    _json(result.materiality),
+                    _json(result.dynamic_subjects),
                     seen,
                     seen,
                     initial_alert_state,
@@ -853,6 +912,11 @@ class Database:
             "unreviewed": unreviewed,
             "decision_counts": decision_counts,
             "guidance_counts": guidance_counts,
+            "actionable_rate": (
+                round(decision_counts["actionable"] / reviewed * 100, 1)
+                if reviewed
+                else 0.0
+            ),
             "actionable_or_monitor_rate": (
                 round(actionable_or_monitor / reviewed * 100, 1) if reviewed else 0.0
             ),
@@ -887,7 +951,8 @@ class Database:
                     categories_json = ?,
                     risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
                     review_questions_json = ?, stakeholders_json = ?, actions_json = ?,
-                    incentive_map_json = ?
+                    incentive_map_json = ?, risk_breakdown_json = ?, materiality_json = ?,
+                    dynamic_subjects_json = ?
                 WHERE market_id = ? AND organization = ?
                 """,
                 (
@@ -903,6 +968,9 @@ class Database:
                     _json(result.stakeholders),
                     _json(result.actions),
                     _json(result.incentive_map),
+                    _json(result.risk_breakdown),
+                    _json(result.materiality),
+                    _json(result.dynamic_subjects),
                     market_id,
                     result.organization,
                 ),
@@ -1203,6 +1271,13 @@ class Database:
         return output
 
     def _market_movements(self, market_ids: list[int]) -> dict[int, dict[str, Any]]:
+        """Return latest, prior, and approximate 24-hour market changes.
+
+        Snapshots are written only when tracked source fields change. The 24-hour
+        comparison therefore uses the newest snapshot captured at or before the
+        24-hour cutoff when one exists; otherwise it uses the first available
+        snapshot and reports the shorter observation window.
+        """
         if not market_ids:
             return {}
         placeholders = ",".join("?" for _ in market_ids)
@@ -1210,7 +1285,7 @@ class Database:
             rows = connection.execute(
                 f"""
                 SELECT market_id, captured_at, probability, volume, volume_24h,
-                       liquidity, open_interest, status
+                       liquidity, open_interest, status, closes_at, rules_hash
                 FROM market_snapshots
                 WHERE market_id IN ({placeholders})
                 ORDER BY market_id, captured_at, id
@@ -1227,29 +1302,68 @@ class Database:
             latest = snapshots[-1]
             previous = snapshots[-2] if len(snapshots) > 1 else None
             first = snapshots[0]
-            deltas: dict[str, float | None] = {}
-            since_first: dict[str, float | None] = {}
-            for field in tracked:
-                current = latest.get(field)
-                prior = previous.get(field) if previous else None
-                origin = first.get(field)
-                deltas[field] = (
-                    float(current) - float(prior)
-                    if current is not None and prior is not None
-                    else None
-                )
-                since_first[field] = (
-                    float(current) - float(origin)
-                    if current is not None and origin is not None
-                    else None
-                )
+            latest_at = parse_datetime(latest.get("captured_at")) or utcnow()
+            cutoff = latest_at - timedelta(hours=24)
+            day_origin = first
+            for candidate in snapshots:
+                captured = parse_datetime(candidate.get("captured_at"))
+                if captured is not None and captured <= cutoff:
+                    day_origin = candidate
+                elif captured is not None and captured > cutoff:
+                    break
+
+            def delta(current: Any, prior: Any) -> float | None:
+                if current is None or prior is None:
+                    return None
+                return float(current) - float(prior)
+
+            deltas = {
+                field: delta(latest.get(field), previous.get(field) if previous else None)
+                for field in tracked
+            }
+            since_first = {
+                field: delta(latest.get(field), first.get(field)) for field in tracked
+            }
+            day_deltas = {
+                field: delta(latest.get(field), day_origin.get(field)) for field in tracked
+            }
+            day_origin_at = parse_datetime(day_origin.get("captured_at"))
+            window_hours = (
+                (latest_at - day_origin_at).total_seconds() / 3600
+                if day_origin_at is not None
+                else None
+            )
+
+            prior_rules = previous.get("rules_hash") if previous else None
+            latest_rules = latest.get("rules_hash")
+            rules_changed = bool(
+                previous
+                and prior_rules
+                and latest_rules
+                and str(prior_rules) != str(latest_rules)
+            )
+            close_changed = bool(
+                previous and (previous.get("closes_at") or None) != (latest.get("closes_at") or None)
+            )
+            status_changed = bool(
+                previous and str(previous.get("status") or "") != str(latest.get("status") or "")
+            )
+            quantitative_changed = bool(
+                previous and any(value not in (None, 0.0) for value in deltas.values())
+            )
             output[market_id] = {
                 "snapshot_count": len(snapshots),
-                "captured_at": latest["captured_at"],
-                "previous_captured_at": previous["captured_at"] if previous else None,
+                "captured_at": latest.get("captured_at"),
+                "previous_captured_at": previous.get("captured_at") if previous else None,
+                "day_origin_at": day_origin.get("captured_at"),
+                "day_window_hours": window_hours,
                 "deltas": deltas,
+                "day_deltas": day_deltas,
                 "since_first": since_first,
-                "changed": bool(previous and any(value not in (None, 0.0) for value in deltas.values())),
+                "rules_changed": rules_changed,
+                "close_changed": close_changed,
+                "status_changed": status_changed,
+                "changed": quantitative_changed or rules_changed or close_changed or status_changed,
             }
         return output
 
@@ -1344,6 +1458,7 @@ class Database:
         source: str | None = None,
         alert_state: str | None = None,
         review_decision: str | None = None,
+        materiality_gate: str = "all",
         include_demo: bool = False,
         view: str = "active",
         sort: str = "priority",
@@ -1352,16 +1467,21 @@ class Database:
     ) -> dict[str, Any]:
         """Return one card per exact contract, grouped under source event/series.
 
-        A market may match several organizations. Those role-specific reviews are
-        combined on one card so the same contract title is never repeated merely
-        because multiple teams are affected. Related thresholds/dates from the
-        same source event are grouped beneath one collapsible series.
+        The materiality gate is applied after movement history is joined to each
+        profile relationship. This keeps the human review queue focused on
+        contracts that have both a credible pathway and a current activation
+        trigger, while retaining lower-materiality matches in Observed.
         """
 
         normalized_view = (view or "active").strip().lower()
         normalized_sort = (sort or "priority").strip().lower()
         if normalized_sort not in {"priority", "review", "closing", "volume", "newest"}:
             normalized_sort = "priority"
+        normalized_gate = (materiality_gate or "all").strip().lower()
+        if normalized_gate not in {"all", "review_today", "escalate", "review", "observed"}:
+            normalized_gate = "all"
+        if normalized_view == "archive":
+            normalized_gate = "all"
 
         scope_sql, scope_params = _market_scope_clause(normalized_view)
         clauses = [scope_sql]
@@ -1379,18 +1499,16 @@ class Database:
         rows = self._query_matches(where, tuple(params), limit=100000)
         contracts_by_id: dict[int, dict[str, Any]] = {}
         for row in rows:
-            market_id = int(row["market_id"])
-            contract = contracts_by_id.get(market_id)
+            market_key = int(row["market_id"])
+            contract = contracts_by_id.get(market_key)
             if contract is None:
                 raw = row.get("raw") or {}
-                display_title = clean_display_title(
-                    row["source"], row["title"], raw
-                )
+                display_title = clean_display_title(row["source"], row["title"], raw)
                 event_key, event_title = event_group_identity(
                     row["source"], row["external_id"], display_title, raw
                 )
                 contract = {
-                    "market_id": market_id,
+                    "market_id": market_key,
                     "source": row["source"],
                     "external_id": row["external_id"],
                     "title": display_title,
@@ -1411,7 +1529,7 @@ class Database:
                     "event_title": event_title,
                     "reviews": [],
                 }
-                contracts_by_id[market_id] = contract
+                contracts_by_id[market_key] = contract
 
             contract["reviews"].append(
                 {
@@ -1429,6 +1547,9 @@ class Database:
                     "stakeholders": row["stakeholders"],
                     "actions": row["actions"],
                     "incentive_map": row.get("incentive_map", {}),
+                    "risk_breakdown": row.get("risk_breakdown", {}),
+                    "materiality": row.get("materiality", {}),
+                    "dynamic_subjects": row.get("dynamic_subjects", []),
                     "match_first_seen_at": row["match_first_seen_at"],
                     "match_last_seen_at": row["match_last_seen_at"],
                     "alert_state": row["alert_state"],
@@ -1445,68 +1566,132 @@ class Database:
                 }
             )
 
-        contracts: list[dict[str, Any]] = []
+        def review_matches_filters(review: dict[str, Any]) -> bool:
+            if organization and review["organization"] != organization:
+                return False
+            if severity and review["severity"] != severity:
+                return False
+            if alert_state and review["alert_state"] != alert_state:
+                return False
+            if review_decision:
+                explicit = review.get("review_decision")
+                if review_decision == "unreviewed":
+                    if explicit or review.get("acknowledged_at"):
+                        return False
+                elif review_decision == "legacy_reviewed":
+                    if explicit or not review.get("acknowledged_at"):
+                        return False
+                elif explicit != review_decision:
+                    return False
+            return True
+
+        candidate_contracts: list[dict[str, Any]] = []
         for contract in contracts_by_id.values():
             reviews = contract["reviews"]
-
-            def review_matches_filters(review: dict[str, Any]) -> bool:
-                if organization and review["organization"] != organization:
-                    return False
-                if severity and review["severity"] != severity:
-                    return False
-                if alert_state and review["alert_state"] != alert_state:
-                    return False
-                if review_decision:
-                    explicit = review.get("review_decision")
-                    if review_decision == "unreviewed":
-                        if explicit or review.get("acknowledged_at"):
-                            return False
-                    elif review_decision == "legacy_reviewed":
-                        if explicit or not review.get("acknowledged_at"):
-                            return False
-                    elif explicit != review_decision:
-                        return False
-                return True
-
             if not any(review_matches_filters(review) for review in reviews):
                 continue
+            candidate_contracts.append(contract)
 
-            reviews.sort(
-                key=lambda item: (
-                    _SEVERITY_RANK.get(str(item["severity"]), 0),
-                    int(item["risk_score"]),
-                    str(item["organization"]),
-                ),
+        market_ids = [int(contract["market_id"]) for contract in candidate_contracts]
+        movement_by_market = self._market_movements(market_ids)
+        exposure_by_market = self._latest_public_exposures(market_ids)
+
+        gate_counts = {"escalate": 0, "review": 0, "observed": 0}
+        contracts: list[dict[str, Any]] = []
+        for contract in candidate_contracts:
+            market_key = int(contract["market_id"])
+            movement = movement_by_market.get(
+                market_key,
+                {
+                    "snapshot_count": 0,
+                    "captured_at": None,
+                    "previous_captured_at": None,
+                    "day_origin_at": None,
+                    "day_window_hours": None,
+                    "deltas": {},
+                    "day_deltas": {},
+                    "since_first": {},
+                    "rules_changed": False,
+                    "close_changed": False,
+                    "status_changed": False,
+                    "changed": False,
+                },
+            )
+            for review in contract["reviews"]:
+                review["materiality"] = apply_market_movement(
+                    review.get("materiality"),
+                    movement=movement,
+                    source=str(contract["source"]),
+                    categories=list(review.get("categories") or []),
+                    match_basis=str(review.get("match_basis") or "direct"),
+                    actions=list(review.get("actions") or []),
+                    stakeholders=list(review.get("stakeholders") or []),
+                    closes_at=contract.get("closes_at"),
+                )
+
+            review_sort_key = lambda item: (
+                GATE_RANK.get(str((item.get("materiality") or {}).get("gate")), 0),
+                int((item.get("materiality") or {}).get("materiality_score") or 0),
+                _SEVERITY_RANK.get(str(item["severity"]), 0),
+                int(item["risk_score"]),
+                str(item["organization"]),
+            )
+            contract["reviews"].sort(key=review_sort_key, reverse=True)
+            reviews = contract["reviews"]
+            eligible_reviews = sorted(
+                (review for review in reviews if review_matches_filters(review)),
+                key=review_sort_key,
                 reverse=True,
             )
-            top_review = reviews[0]
-            contract["risk_score"] = max(int(item["risk_score"]) for item in reviews)
+            # The contract card still exposes all affected profiles, but its queue
+            # gate, score, and review state follow the currently selected filter.
+            # This prevents a high-materiality relationship for one organization
+            # from leaking into another organization's filtered review queue.
+            contract["materiality"] = aggregate_materiality(eligible_reviews)
+            gate = str(contract["materiality"].get("gate") or "observed")
+            gate_counts[gate] = gate_counts.get(gate, 0) + 1
+
+            if normalized_gate == "review_today" and gate not in {"review", "escalate"}:
+                continue
+            if normalized_gate in {"escalate", "review", "observed"} and gate != normalized_gate:
+                continue
+
+            top_review = eligible_reviews[0]
+            contract["risk_score"] = max(int(item["risk_score"]) for item in eligible_reviews)
             contract["severity"] = max(
-                (str(item["severity"]) for item in reviews),
+                (str(item["severity"]) for item in eligible_reviews),
                 key=lambda value: _SEVERITY_RANK.get(value, 0),
             )
             contract["organizations"] = [item["organization"] for item in reviews]
+            contract["filtered_organizations"] = [
+                item["organization"] for item in eligible_reviews
+            ]
+            contract["dynamic_subjects"] = list(
+                dict.fromkeys(
+                    subject
+                    for item in reviews
+                    for subject in (item.get("dynamic_subjects") or [])
+                )
+            )
             contract["matched_identity_terms"] = list(
                 dict.fromkeys(
-                    term
-                    for review in reviews
-                    for term in review["matched_identity_terms"]
+                    term for item in reviews for term in item["matched_identity_terms"]
                 )
             )
             contract["alert_states"] = list(
-                dict.fromkeys(str(item["alert_state"]) for item in reviews)
+                dict.fromkeys(str(item["alert_state"]) for item in eligible_reviews)
             )
-            contract["review_total"] = len(reviews)
+            contract["review_total"] = len(eligible_reviews)
             contract["reviewed_count"] = sum(
                 1
-                for item in reviews
+                for item in eligible_reviews
                 if item.get("review_decision") or item.get("acknowledged_at")
             )
             contract["explicit_review_count"] = sum(
-                1 for item in reviews if item.get("review_decision")
+                1 for item in eligible_reviews if item.get("review_decision")
             )
-            contract["all_reviewed"] = (
-                contract["review_total"] > 0
+            contract["all_reviewed"] = bool(
+                contract["review_total"]
                 and contract["reviewed_count"] == contract["review_total"]
             )
             contract["reviewable"] = normalized_view == "active"
@@ -1533,39 +1718,23 @@ class Database:
                 else None
             )
             contract["top_match_first_seen_at"] = max(
-                str(item["match_first_seen_at"]) for item in reviews
+                str(item["match_first_seen_at"]) for item in eligible_reviews
             )
             contract["top_review"] = top_review
+            contract["movement"] = movement
+            contract["public_exposure"] = exposure_by_market.get(market_key)
             contracts.append(contract)
 
-        market_ids = [int(contract["market_id"]) for contract in contracts]
-        movement_by_market = self._market_movements(market_ids)
-        exposure_by_market = self._latest_public_exposures(market_ids)
-        for contract in contracts:
-            market_id = int(contract["market_id"])
-            contract["movement"] = movement_by_market.get(
-                market_id,
-                {
-                    "snapshot_count": 0,
-                    "captured_at": None,
-                    "previous_captured_at": None,
-                    "deltas": {},
-                    "since_first": {},
-                    "changed": False,
-                },
-            )
-            contract["public_exposure"] = exposure_by_market.get(market_id)
-
         def sort_key(contract: dict[str, Any]) -> tuple[Any, ...]:
+            materiality = contract.get("materiality") or {}
+            gate_rank = GATE_RANK.get(str(materiality.get("gate")), 0)
+            materiality_score = int(materiality.get("materiality_score") or 0)
             if normalized_sort == "review":
-                review_bucket = (
-                    0
-                    if contract["reviewed_count"] == 0
-                    else (2 if contract["all_reviewed"] else 1)
-                )
+                review_bucket = 0 if contract["reviewed_count"] == 0 else (2 if contract["all_reviewed"] else 1)
                 return (
                     review_bucket,
-                    -_SEVERITY_RANK.get(str(contract["severity"]), 0),
+                    -gate_rank,
+                    -materiality_score,
                     -int(contract["risk_score"]),
                     contract["top_match_first_seen_at"],
                 )
@@ -1573,20 +1742,18 @@ class Database:
                 return (
                     contract["closes_at"] is None,
                     contract["closes_at"] or "9999-12-31T23:59:59+00:00",
-                    -int(contract["risk_score"]),
+                    -gate_rank,
+                    -materiality_score,
                 )
             if normalized_sort == "volume":
                 return (
                     -(float(contract["volume"]) if contract["volume"] is not None else -1.0),
-                    -int(contract["risk_score"]),
+                    -gate_rank,
+                    -materiality_score,
                 )
             if normalized_sort == "newest":
-                return (contract["top_match_first_seen_at"], int(contract["risk_score"]))
-            return (
-                _SEVERITY_RANK.get(str(contract["severity"]), 0),
-                int(contract["risk_score"]),
-                contract["top_match_first_seen_at"],
-            )
+                return (contract["top_match_first_seen_at"], gate_rank, materiality_score)
+            return (gate_rank, materiality_score, int(contract["risk_score"]), contract["top_match_first_seen_at"])
 
         reverse = normalized_sort in {"priority", "newest"}
         contracts.sort(key=sort_key, reverse=reverse)
@@ -1610,23 +1777,37 @@ class Database:
         for group in groups:
             items = group["contracts"]
             group["count"] = len(items)
-            group["severity"] = max(
-                (item["severity"] for item in items),
-                key=lambda value: _SEVERITY_RANK.get(value, 0),
+            top_item = max(
+                items,
+                key=lambda item: (
+                    GATE_RANK.get(str((item.get("materiality") or {}).get("gate")), 0),
+                    int((item.get("materiality") or {}).get("materiality_score") or 0),
+                    int(item["risk_score"]),
+                ),
             )
-            group["risk_score"] = max(item["risk_score"] for item in items)
+            group["severity"] = top_item["severity"]
+            group["risk_score"] = top_item["risk_score"]
+            group["materiality"] = top_item.get("materiality") or {}
             close_values = [item["closes_at"] for item in items if item["closes_at"]]
             group["nearest_close"] = min(close_values) if close_values else None
             group["organizations"] = list(
-                dict.fromkeys(
-                    org for item in items for org in item["organizations"]
-                )
+                dict.fromkeys(org for item in items for org in item["organizations"])
+            )
+            group["dynamic_subjects"] = list(
+                dict.fromkeys(subject for item in items for subject in item.get("dynamic_subjects", []))
             )
 
         return {
             "groups": groups,
             "contracts": contracts,
             "total": total,
+            "all_active_total": sum(gate_counts.values()),
+            "gate_counts": {
+                **gate_counts,
+                "review_today": gate_counts.get("review", 0) + gate_counts.get("escalate", 0),
+                "all": sum(gate_counts.values()),
+            },
+            "materiality_gate": normalized_gate,
             "view": normalized_view,
             "sort": normalized_sort,
         }
@@ -1641,8 +1822,19 @@ class Database:
         event_key, event_title = event_group_identity(
             first["source"], first["external_id"], display_title, raw
         )
+        movement = self._market_movements([market_id]).get(market_id)
         reviews: list[dict[str, Any]] = []
         for row in rows:
+            materiality = apply_market_movement(
+                row.get("materiality") or {},
+                movement=movement,
+                source=str(first["source"]),
+                categories=list(row.get("categories") or []),
+                match_basis=str(row.get("match_basis") or "direct"),
+                actions=list(row.get("actions") or []),
+                stakeholders=list(row.get("stakeholders") or []),
+                closes_at=first.get("closes_at"),
+            )
             reviews.append(
                 {
                     "match_id": row["match_id"],
@@ -1659,6 +1851,9 @@ class Database:
                     "stakeholders": row["stakeholders"],
                     "actions": row["actions"],
                     "incentive_map": row.get("incentive_map") or {},
+                    "risk_breakdown": row.get("risk_breakdown") or {},
+                    "materiality": materiality,
+                    "dynamic_subjects": row.get("dynamic_subjects") or [],
                     "review_decision": row.get("review_decision"),
                     "review_note": row.get("review_note") or "",
                     "corrected_role": row.get("corrected_role") or "",
@@ -1668,15 +1863,16 @@ class Database:
             )
         reviews.sort(
             key=lambda item: (
+                GATE_RANK.get(str((item.get("materiality") or {}).get("gate")), 0),
+                int((item.get("materiality") or {}).get("materiality_score") or 0),
                 _SEVERITY_RANK.get(str(item["severity"]), 0),
                 int(item["risk_score"]),
-                str(item["organization"]),
             ),
             reverse=True,
         )
         active = self.market_is_active(market_id)
-        movement = self._market_movements([market_id]).get(market_id)
         exposure = self.latest_public_exposure(market_id)
+        contract_materiality = aggregate_materiality(reviews)
         return {
             "market_id": market_id,
             "source": first["source"],
@@ -1699,6 +1895,10 @@ class Database:
             "event_title": event_title,
             "reviews": reviews,
             "organizations": [item["organization"] for item in reviews],
+            "dynamic_subjects": list(
+                dict.fromkeys(subject for item in reviews for subject in item.get("dynamic_subjects", []))
+            ),
+            "materiality": contract_materiality,
             "risk_score": max(int(item["risk_score"]) for item in reviews),
             "severity": max(
                 (str(item["severity"]) for item in reviews),
@@ -1723,6 +1923,7 @@ class Database:
                     mt.categories_json, mt.risk_score, mt.severity, mt.match_basis,
                     mt.roles_json, mt.reasons_json, mt.review_questions_json,
                     mt.stakeholders_json, mt.actions_json, mt.incentive_map_json,
+                    mt.risk_breakdown_json, mt.materiality_json, mt.dynamic_subjects_json,
                     mt.first_seen_at AS match_first_seen_at,
                     mt.last_seen_at AS match_last_seen_at,
                     mt.alert_state, mt.notified_at, mt.acknowledged_at,
@@ -1770,6 +1971,9 @@ class Database:
                 clean_name = field.removesuffix("_json")
                 item[clean_name] = _loads(item.pop(field), [])
             item["incentive_map"] = _loads(item.pop("incentive_map_json", None), {})
+            item["risk_breakdown"] = _loads(item.pop("risk_breakdown_json", None), {})
+            item["materiality"] = _loads(item.pop("materiality_json", None), {})
+            item["dynamic_subjects"] = _loads(item.pop("dynamic_subjects_json", None), [])
             item["review_reason_codes"] = _loads(
                 item.pop("review_reason_codes_json", None), []
             )

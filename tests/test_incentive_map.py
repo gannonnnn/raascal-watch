@@ -261,6 +261,8 @@ def test_market_snapshots_and_field_note_render(tmp_path: Path, monkeypatch) -> 
     assert "Open Field Note" in dashboard.text
     assert field_note.status_code == 200
     assert "Who benefits?" in field_note.text
+    assert "How was it connected?" in field_note.text
+    assert "Is the reported activity material?" in field_note.text
     assert "How could the market create a false business signal?" in field_note.text
     assert "PUBLIC MARKET SIGNAL" in field_note.text
 

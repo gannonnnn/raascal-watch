@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from .incentive import build_incentive_map
+from .materiality import build_static_materiality
 from .models import (
     DependencyRule,
     MarketRecord,
@@ -12,6 +13,7 @@ from .models import (
     OrganizationWatch,
     Watchlist,
 )
+from .subjects import extract_dynamic_subjects
 from .text import find_phrases, unique_strings
 
 
@@ -290,9 +292,13 @@ def _build_contract_actions(
     category_set = set(categories)
     contract_title = _short(market.title, 110)
     close_label = _close_label(market.closes_at)
+    activity_label = (
+        f"{market.volume:,.0f} contracts" if market.source == "kalshi" and market.volume is not None
+        else _money(market.volume)
+    )
     actions: list[str] = [
         (
-            f"Preserve a timestamped snapshot of this {market.source.title()} contract—“{contract_title}”—including the full rules, URL, displayed probability ({_percent(market.probability)}), volume ({_money(market.volume)}), and close time ({close_label})."
+            f"Preserve a timestamped snapshot of this {market.source.title()} contract—“{contract_title}”—including the full rules, URL, displayed probability ({_percent(market.probability)}), reported activity ({activity_label}), and close time ({close_label})."
         )
     ]
 
@@ -347,9 +353,15 @@ def _build_contract_actions(
     if market.volume is not None or market.open_interest is not None:
         exposure_parts = []
         if market.volume is not None:
-            exposure_parts.append(f"reported cumulative volume is {_money(market.volume)}")
+            if market.source == "kalshi":
+                exposure_parts.append(f"reported cumulative volume is {market.volume:,.0f} contracts")
+            else:
+                exposure_parts.append(f"reported cumulative volume is {_money(market.volume)}")
         if market.open_interest is not None:
-            exposure_parts.append(f"reported open interest is {_money(market.open_interest)}")
+            if market.source == "kalshi":
+                exposure_parts.append(f"reported open interest is {market.open_interest:,.0f} contracts")
+            else:
+                exposure_parts.append(f"reported open interest is {_money(market.open_interest)}")
         exposure = " and ".join(exposure_parts)
         actions.append(
             f"Review holder concentration, open interest, and sharp price or volume changes when public data permits. For context, {exposure}; cumulative volume is not the amount any one trader stands to gain."
@@ -402,17 +414,51 @@ class RiskEngine:
         if not identity_hits and not dependency_rules:
             return None
 
+        score = 0
+        score_components: list[dict[str, object]] = []
+
+        def add_points(
+            points: int,
+            label: str,
+            evidence: str,
+            *,
+            component_type: str = "score",
+        ) -> None:
+            nonlocal score
+            score += points
+            score_components.append(
+                {
+                    "label": label,
+                    "points": points,
+                    "evidence": evidence,
+                    "type": component_type,
+                }
+            )
+
         if organization.is_theme:
             match_basis = "theme"
-            base_score = 8
+            add_points(
+                8,
+                "Monitored theme relationship",
+                "The listing fits a configured contract theme; this does not assign the outcome to one company.",
+            )
         elif identity_hits:
             match_basis = "direct"
-            base_score = 15
+            add_points(
+                15,
+                "Direct monitored-identity reference",
+                f"Matched: {', '.join(identity_hits[:5])}.",
+            )
         else:
             confidence = dependency_rules[0].confidence if dependency_rules else "possible"
             match_basis = f"{confidence}_dependency"
-            base_score = {"verified": 18, "linked": 12, "possible": 8}.get(
+            base_points = {"verified": 18, "linked": 12, "possible": 8}.get(
                 confidence, 8
+            )
+            add_points(
+                base_points,
+                f"{confidence.title()} dependency relationship",
+                dependency_rules[0].evidence if dependency_rules else "Configured dependency relationship.",
             )
 
         title_identity_hits = (
@@ -426,7 +472,6 @@ class RiskEngine:
             else []
         )
         metric_hits = find_phrases(text, organization.metrics)
-        score = base_score
         reasons: list[str] = []
         categories: list[str] = []
         stakeholders = list(DEFAULT_STAKEHOLDERS) + list(organization.stakeholders)
@@ -458,11 +503,21 @@ class RiskEngine:
             )
 
         if match_basis == "direct" and len(identity_hits) > 1:
-            score += min(10, (len(identity_hits) - 1) * 3)
+            points = min(10, (len(identity_hits) - 1) * 3)
+            add_points(
+                points,
+                "Additional identity evidence",
+                "Multiple monitored company, product, or executive terms matched.",
+            )
             reasons.append("Multiple monitored company, product, or executive terms matched.")
 
         if metric_hits:
-            score += min(20, 8 + (len(metric_hits) - 1) * 3)
+            points = min(20, 8 + (len(metric_hits) - 1) * 3)
+            add_points(
+                points,
+                "Monitored metric or behavior",
+                f"Matched: {', '.join(metric_hits[:6])}.",
+            )
             reasons.append(
                 f"Referenced monitored metric or behavior: {', '.join(metric_hits[:6])}."
             )
@@ -472,7 +527,11 @@ class RiskEngine:
             hits = find_phrases(text, category.terms)
             if not hits:
                 continue
-            score += category.weight
+            add_points(
+                category.weight,
+                category.name.replace("_", " ").title(),
+                f"Matched: {', '.join(hits[:6])}.",
+            )
             categories.append(category.name)
             reasons.append(
                 f"{category.name.replace('_', ' ').title()} signal: {', '.join(hits[:6])}."
@@ -486,7 +545,11 @@ class RiskEngine:
                 category = category_by_name.get(category_name)
                 categories.append(category_name)
                 if category:
-                    score += category.weight
+                    add_points(
+                        category.weight,
+                        f"Dependency-mapped {category_name.replace('_', ' ')}",
+                        rule.evidence or f"Added by dependency rule {rule.name}.",
+                    )
                     stakeholders.extend(category.stakeholders)
                     reasons.append(
                         f"{category_name.replace('_', ' ').title()} was added by the configured dependency mapping."
@@ -494,27 +557,61 @@ class RiskEngine:
 
         volume = market.volume or 0.0
         if volume >= 1_000_000:
-            score += 20
-            reasons.append("Reported cumulative market volume is at least $1 million.")
+            points = 20
+            threshold = "1 million"
         elif volume >= 100_000:
-            score += 15
-            reasons.append("Reported cumulative market volume is at least $100,000.")
+            points = 15
+            threshold = "100,000"
         elif volume >= 10_000:
-            score += 10
-            reasons.append("Reported cumulative market volume is at least $10,000.")
+            points = 10
+            threshold = "10,000"
         elif volume >= 1_000:
-            score += 5
-            reasons.append("Reported cumulative market volume is at least $1,000.")
+            points = 5
+            threshold = "1,000"
+        else:
+            points = 0
+            threshold = ""
+        if points:
+            unit = "contracts" if market.source == "kalshi" else "reported currency units"
+            add_points(
+                points,
+                "Reported cumulative activity",
+                f"Lifetime volume is at least {threshold} {unit}.",
+            )
+            if market.source == "kalshi":
+                reasons.append(
+                    f"Reported cumulative market volume is at least {threshold} contracts; this is not a dollar-profit figure."
+                )
+            else:
+                reasons.append(
+                    f"Reported cumulative market volume is at least ${threshold}."
+                )
 
         liquidity = market.liquidity or 0.0
         if liquidity >= 100_000:
-            score += 10
+            add_points(
+                10,
+                "Reported liquidity",
+                "Reported liquidity is at least $100,000.",
+            )
             reasons.append("Reported liquidity is at least $100,000.")
         elif liquidity >= 10_000:
-            score += 5
+            add_points(
+                5,
+                "Reported liquidity",
+                "Reported liquidity is at least $10,000.",
+            )
             reasons.append("Reported liquidity is at least $10,000.")
 
         if market.probability is not None:
+            score_components.append(
+                {
+                    "label": "Displayed market probability",
+                    "points": 0,
+                    "evidence": f"{_percent(market.probability)}; market pricing is not a measured likelihood of abuse.",
+                    "type": "context",
+                }
+            )
             reasons.append(
                 f"Displayed market probability is {_percent(market.probability)}; this is market pricing, not a measured likelihood of abuse."
             )
@@ -523,13 +620,13 @@ class RiskEngine:
         hours = _hours_until(market.closes_at, now)
         if hours is not None:
             if 0 <= hours <= 24:
-                score += 15
+                add_points(15, "Settlement urgency", "The contract is scheduled to close within 24 hours.")
                 reasons.append("The contract is scheduled to close within 24 hours.")
             elif 24 < hours <= 24 * 7:
-                score += 10
+                add_points(10, "Settlement urgency", "The contract is scheduled to close within seven days.")
                 reasons.append("The contract is scheduled to close within seven days.")
             elif 24 * 7 < hours <= 24 * 30:
-                score += 5
+                add_points(5, "Settlement urgency", "The contract is scheduled to close within 30 days.")
                 reasons.append("The contract is scheduled to close within 30 days.")
 
         roles = _infer_roles(
@@ -562,8 +659,35 @@ class RiskEngine:
             categories=categories,
             metric_label=metric_label,
         )
+        dynamic_subjects = extract_dynamic_subjects(
+            market,
+            profile_name=organization.name,
+            categories=categories,
+        )
 
-        score = max(0, min(100, score))
+        raw_score = score
+        score = max(0, min(100, raw_score))
+        risk_breakdown = {
+            "raw_score": raw_score,
+            "score": score,
+            "cap_applied": raw_score > 100,
+            "components": score_components,
+            "explanation": (
+                "The legacy risk score is an additive retrieval-priority score. "
+                "The materiality gate separately decides whether the contract belongs in today's human review queue."
+            ),
+        }
+        materiality = build_static_materiality(
+            market=market,
+            organization=organization,
+            match_basis=match_basis,
+            roles=roles,
+            categories=categories,
+            actions=actions,
+            stakeholders=unique_strings(stakeholders),
+            dynamic_subjects=dynamic_subjects,
+        )
+
         matched_terms = (
             unique_strings(identity_hits)
             if identity_hits
@@ -583,4 +707,7 @@ class RiskEngine:
             stakeholders=unique_strings(stakeholders),
             actions=actions,
             incentive_map=incentive_map,
+            risk_breakdown=risk_breakdown,
+            materiality=materiality,
+            dynamic_subjects=dynamic_subjects,
         )

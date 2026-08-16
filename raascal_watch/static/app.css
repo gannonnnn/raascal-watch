@@ -704,3 +704,133 @@ td { border-top: 1px solid var(--line); padding: 11px 10px; white-space: nowrap;
   font-size: 0.92em;
   opacity: 0.82;
 }
+
+/* v0.8 materiality gate and dynamic subject presentation */
+.materiality-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.38rem 0.68rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.materiality-escalate { background: #f9d7d7; color: #9a2424; }
+.materiality-review { background: #fff0c8; color: #815400; }
+.materiality-observed { background: #e4efed; color: #315e59; }
+.legacy-severity { opacity: 0.62; font-size: 0.65rem; }
+.gate-escalate { border-left-color: #a82424; }
+.gate-review { border-left-color: #d27b12; }
+.gate-observed { border-left-color: #68847f; }
+.dynamic-subject-line {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 0.65rem;
+  color: var(--muted, #62736f);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dynamic-subject-line > div { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.dynamic-subject-line strong {
+  border: 1px solid #cbd8d5;
+  background: #f5f8f7;
+  color: #173c38;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.materiality-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+  border-radius: 12px;
+  background: #f5f8f7;
+  border: 1px solid #dbe5e2;
+}
+.materiality-strip > div { display: grid; gap: 0.28rem; }
+.materiality-strip span {
+  color: #60706d;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.materiality-strip strong { font-size: 0.88rem; line-height: 1.35; }
+.materiality-strip-escalate { background: #fff3f2; border-color: #edc4c0; }
+.materiality-strip-review { background: #fff9ea; border-color: #edd9aa; }
+.materiality-stat-grid .hero-stat {
+  background: #102522;
+  color: #fff;
+}
+.materiality-stat-grid .hero-stat span,
+.materiality-stat-grid .hero-stat small { color: #c9d9d5; }
+.materiality-brief {
+  margin-top: 1rem;
+  border-radius: 16px;
+  border: 1px solid #d8e2df;
+  padding: 1rem;
+  background: #f9fbfa;
+}
+.materiality-brief-review { border-color: #e5c67a; background: #fffbf1; }
+.materiality-brief-escalate { border-color: #dfa6a0; background: #fff6f5; }
+.materiality-brief-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+.materiality-brief-heading h5 { margin: 0.12rem 0 0; }
+.materiality-brief-heading > strong { font-size: 1.55rem; }
+.materiality-answer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.materiality-answer-grid > div {
+  background: #fff;
+  border: 1px solid #e0e8e5;
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+.materiality-answer-grid h6 { margin: 0 0 0.35rem; color: #536965; }
+.materiality-answer-grid p,
+.materiality-answer-grid ul,
+.materiality-answer-grid ol { margin: 0.38rem 0 0; }
+.materiality-answer-grid ul,
+.materiality-answer-grid ol { padding-left: 1.1rem; }
+.materiality-answer-grid small { display: block; margin-top: 0.5rem; color: #667874; line-height: 1.4; }
+.score-breakdown { margin-top: 0.8rem; }
+.score-breakdown summary { cursor: pointer; font-weight: 800; color: #145e57; }
+.score-component-list { display: grid; gap: 0.45rem; margin-top: 0.7rem; }
+.score-component {
+  display: grid;
+  grid-template-columns: 3rem 11rem minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: baseline;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e3eae8;
+}
+.score-component > strong { color: #9b5b00; }
+.score-component small { color: #61736f; }
+.score-component.context-component > strong { color: #71817e; }
+.score-cap-note { color: #765c2a; font-size: 0.85rem; }
+
+@media (max-width: 850px) {
+  .materiality-strip,
+  .materiality-answer-grid { grid-template-columns: 1fr; }
+  .score-component { grid-template-columns: 2.5rem 1fr; }
+  .score-component small { grid-column: 1 / -1; }
+  .dynamic-subject-line { flex-direction: column; gap: 0.35rem; }
+}

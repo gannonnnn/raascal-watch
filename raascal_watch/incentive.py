@@ -100,6 +100,11 @@ def _organization_access_context(name: str) -> list[str]:
             "Data operations, licensing, corrections, and source-governance personnel",
             "Airline, airport, and data partners with early cancellation or status information",
         ]
+    if "apple app store" in lowered or "app store ranking" in lowered:
+        return [
+            "App developers, Growth teams, acquisition agencies, and distribution partners with advance campaign plans",
+            "Apple App Store integrity, chart, developer-relations, and measurement teams",
+        ]
     return []
 
 
@@ -618,8 +623,10 @@ def _post_close_checks(source: str, metric_label: str) -> list[str]:
     return checks[:6]
 
 
-def _field_note_headline(categories: list[str], roles: list[str]) -> str:
+def _field_note_headline(categories: list[str], roles: list[str], profile_name: str = "") -> str:
     category_set = set(categories)
+    if profile_name.casefold() in {"apple app store", "app store ranking markets"}:
+        return "The metric moved. Did demand?"
     if "oracle_and_data_dependency" in category_set or any(
         "Resolution-data" in role for role in roles
     ):
@@ -692,7 +699,7 @@ def build_incentive_map(
 
     return {
         "version": 1,
-        "headline": _field_note_headline(categories, roles),
+        "headline": _field_note_headline(categories, roles, organization.name),
         "outcome_focus": _outcome_focus(categories, roles),
         "benefit_sides": [
             _position_side(

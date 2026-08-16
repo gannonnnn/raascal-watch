@@ -83,11 +83,12 @@
 {%- endmacro %}
 
 {% macro contract_card(item, view) -%}
-  <article class="alert-card severity-{{ item.severity }} {{ 'archived-card' if view == 'archive' else '' }}" id="contract-{{ item.market_id }}">
+  <article class="alert-card severity-{{ item.severity }} gate-{{ item.materiality.gate or 'observed' }} {{ 'archived-card' if view == 'archive' else '' }}" id="contract-{{ item.market_id }}">
     <div class="alert-main">
       <div class="alert-title-row">
-        <span class="severity-badge">{{ item.severity }}</span>
+        <span class="materiality-badge materiality-{{ item.materiality.gate or 'observed' }}">{{ item.materiality.gate_label or 'Observed' }}</span>
         <span class="source-badge">{{ item.source }}</span>
+        <span class="severity-badge legacy-severity">Retrieval {{ item.severity }}</span>
         <span class="state-badge {{ 'archive-state' if view == 'archive' else '' }}">{{ item.display_state }}</span>
       </div>
 
@@ -103,13 +104,23 @@
           {% for organization in item.organizations %}<span>{{ organization }}</span>{% endfor %}
         </div>
       </div>
+      {% if item.dynamic_subjects %}
+        <div class="dynamic-subject-line"><span>Dynamic subjects / outcomes</span><div>{% for subject in item.dynamic_subjects %}<strong>{{ subject }}</strong>{% endfor %}</div></div>
+      {% endif %}
 
       <div class="metric-row">
-        <div><span>Priority score</span><strong>{{ item.risk_score }}/100</strong></div>
+        <div><span>Materiality</span><strong>{{ item.materiality.materiality_score or 0 }}/100</strong></div>
         <div><span>Probability</span><strong>{{ item.probability | probability }}</strong></div>
-        <div><span>Cumulative volume</span><strong>{{ item.volume | money }}</strong></div>
+        <div><span>Reported activity</span><strong>{{ item.volume | activity(item.source) }}</strong></div>
         <div><span>{{ 'Closed' if view == 'archive' else 'Closes' }}</span><strong>{{ item.closes_at | date }}</strong></div>
       </div>
+
+      {% if item.materiality %}
+        <div class="materiality-strip materiality-strip-{{ item.materiality.gate }}">
+          <div><span>Why this is here now</span><strong>{{ item.materiality.why_action }}</strong></div>
+          <div><span>What changed</span><strong>{{ item.materiality.what_changed[0] if item.materiality.what_changed else 'No material change recorded yet.' }}</strong></div>
+        </div>
+      {% endif %}
 
       {% if item.movement and item.movement.snapshot_count > 1 %}
         {% set probability_delta = item.movement.deltas.probability %}
@@ -117,7 +128,7 @@
         <div class="movement-strip">
           <span><strong>{{ item.movement.snapshot_count }}</strong> market snapshots</span>
           {% if probability_delta is not none %}<span>Latest probability move: <strong>{{ '+' if probability_delta > 0 else '' }}{{ (probability_delta * 100) | round(1) }} pts</strong></span>{% endif %}
-          {% if volume_delta is not none %}<span>Latest volume change: <strong>{{ '+' if volume_delta > 0 else '' }}{{ volume_delta | money }}</strong></span>{% endif %}
+          {% if volume_delta is not none %}<span>Latest activity change: <strong>{{ volume_delta | activity_delta(item.source) }}</strong></span>{% endif %}
         </div>
       {% endif %}
 
@@ -139,7 +150,7 @@
 
     {% if view == 'active' %}
       <details class="contract-review">
-        <summary>Review guidance and record an assessment</summary>
+        <summary>Why this warrants attention—and what to do next</summary>
         <p class="guidance-note"><strong>Contract-specific guidance:</strong> generated deterministically from this listing’s title, rules, source, probability, volume, close time, matched profile role, and configured watchlist. Your assessment below is what calibrates the system.</p>
 
         {{ public_exposure_panel(item, false) }}
@@ -168,6 +179,62 @@
             <div class="role-row" aria-label="Likely organization roles">
               {% for role in review.roles %}<span class="role-badge">{{ role }}</span>{% endfor %}
             </div>
+
+            {% if review.materiality %}
+              {% set mat = review.materiality %}
+              {% set dims = mat.dimensions %}
+              <section class="materiality-brief materiality-brief-{{ mat.gate }}">
+                <div class="materiality-brief-heading">
+                  <div><p class="eyebrow">Materiality gate</p><h5>{{ mat.gate_label }}</h5></div>
+                  <strong>{{ mat.materiality_score }}/100</strong>
+                </div>
+                <div class="materiality-answer-grid">
+                  <div>
+                    <h6>Is this more than a keyword monitor?</h6>
+                    <strong>{{ 'Yes—relationship evidence extends beyond a direct phrase match' if dims.relationship.more_than_keyword else 'The relationship began with a direct phrase match; actionability did not' }}</strong>
+                    <p>{{ dims.relationship.label }}. {{ dims.relationship.rationale }}</p>
+                  </div>
+                  <div>
+                    <h6>Why does this require action?</h6>
+                    <strong>{{ mat.why_action }}</strong>
+                    <ul>{% for driver in mat.drivers %}<li>{{ driver }}</li>{% endfor %}</ul>
+                  </div>
+                  <div>
+                    <h6>What changed today?</h6>
+                    <strong>{{ dims.market_movement.label }}</strong>
+                    <ul>{% for change in mat.what_changed %}<li>{{ change }}</li>{% endfor %}</ul>
+                  </div>
+                  <div>
+                    <h6>Is the money or activity material?</h6>
+                    <strong>{{ dims.economic_exposure.label }}</strong>
+                    <ul>{% for fact in dims.economic_exposure.facts %}<li>{{ fact }}</li>{% endfor %}</ul>
+                    <small>{{ dims.economic_exposure.caveat }}</small>
+                  </div>
+                  <div>
+                    <h6>Could anyone realistically influence it?</h6>
+                    <strong>{{ dims.influenceability.label }} · {{ dims.influenceability.score }}/100</strong>
+                    <ul>{% for reason in dims.influenceability.rationales %}<li>{{ reason }}</li>{% endfor %}</ul>
+                  </div>
+                  <div>
+                    <h6>What should the company do differently?</h6>
+                    <strong>{{ mat.response.headline }}</strong>
+                    <ol>{% for step in mat.response.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+                  </div>
+                </div>
+                {% if review.risk_breakdown %}
+                  <details class="score-breakdown">
+                    <summary>Why the retrieval score is {{ review.risk_score }}/100</summary>
+                    <p>{{ review.risk_breakdown.explanation }}</p>
+                    <div class="score-component-list">
+                      {% for component in review.risk_breakdown.components %}
+                        <div class="score-component {{ 'context-component' if component.type == 'context' else '' }}"><strong>{{ '+' if component.points > 0 else '' }}{{ component.points }}</strong><span>{{ component.label }}</span><small>{{ component.evidence }}</small></div>
+                      {% endfor %}
+                    </div>
+                    {% if review.risk_breakdown.cap_applied %}<p class="score-cap-note">Raw additive score: {{ review.risk_breakdown.raw_score }}. The displayed retrieval score is capped at 100; the materiality gate—not the cap—determines today’s queue.</p>{% endif %}
+                  </details>
+                {% endif %}
+              </section>
+            {% endif %}
 
             {% if review.incentive_map %}
               {% set map = review.incentive_map %}
@@ -378,8 +445,8 @@
     <section class="hero">
       <div>
         <p class="eyebrow">Live prediction-market monitoring MVP</p>
-        <h2>Know when an outside financial incentive appears around your platform.</h2>
-        <p class="hero-copy">Kalshi and Polymarket are checked every {{ poll_interval }} minutes. Only active contracts enter the review queue. Closed, inactive, settled, and expired contracts move automatically to a separate archive.</p>
+        <h2>See the few contracts that warrant attention today—and why.</h2>
+        <p class="hero-copy">RaaScal Watch separates broad observed intelligence from contracts with a credible influence, information, data-dependency, or downstream-cost pathway plus a current trigger such as movement, material activity, or approaching settlement.</p>
       </div>
       <div class="watching-card">
         <span class="small-label">Watching organizations and themes</span>
@@ -411,26 +478,32 @@
       </div>
     {% endfor %}
 
-    <nav class="view-tabs" aria-label="Contract lifecycle views">
-      <a href="{{ active_url }}" class="view-tab {{ 'active' if view == 'active' else '' }}">
-        <span>Active review queue</span><strong>{{ stats.active_matches }}</strong>
+    <nav class="view-tabs" aria-label="Materiality and lifecycle views">
+      <a href="{{ review_today_url }}" class="view-tab {{ 'active' if view == 'active' and materiality_gate == 'review_today' else '' }}">
+        <span>Review today</span><strong>{{ materiality_counts.review_today }}</strong>
+      </a>
+      <a href="{{ observed_url }}" class="view-tab {{ 'active' if view == 'active' and materiality_gate == 'observed' else '' }}">
+        <span>Observed</span><strong>{{ materiality_counts.observed }}</strong>
+      </a>
+      <a href="{{ all_active_url }}" class="view-tab {{ 'active' if view == 'active' and materiality_gate == 'all' else '' }}">
+        <span>All active</span><strong>{{ materiality_counts.all }}</strong>
       </a>
       <a href="{{ archive_url }}" class="view-tab {{ 'active' if view == 'archive' else '' }}">
         <span>Archive</span><strong>{{ stats.archive_matches }}</strong>
       </a>
     </nav>
 
-    <section class="stat-grid" aria-label="Monitoring summary">
+    <section class="stat-grid materiality-stat-grid" aria-label="Monitoring summary">
       {% if view == 'active' %}
-        <article class="stat-card"><span>Active market records indexed</span><strong>{{ stats.markets }}</strong></article>
-        <article class="stat-card"><span>Active candidate contracts</span><strong>{{ stats.matches }}</strong></article>
-        <article class="stat-card"><span>High-priority active contracts</span><strong>{{ stats.high_risk }}</strong></article>
-        <article class="stat-card"><span>Unreviewed active contracts</span><strong>{{ stats.unacknowledged }}</strong></article>
+        <article class="stat-card hero-stat"><span>Contracts warranting review today</span><strong>{{ materiality_counts.review_today }}</strong><small>Review + escalate gates</small></article>
+        <article class="stat-card"><span>Escalate now</span><strong>{{ materiality_counts.escalate }}</strong><small>Strongest time-bound signals</small></article>
+        <article class="stat-card"><span>Observed intelligence</span><strong>{{ materiality_counts.observed }}</strong><small>Retained without human action today</small></article>
+        <article class="stat-card"><span>Human-confirmed actionable rate</span><strong>{{ (calibration.actionable_rate ~ '%') if calibration.reviewed else '—' }}</strong><small>{{ calibration.decision_counts.actionable }} actionable of {{ calibration.reviewed }} structured reviews · {{ calibration.actionable_or_monitor_rate }}% actionable or monitor</small></article>
       {% else %}
         <article class="stat-card"><span>Archived market records</span><strong>{{ stats.markets }}</strong></article>
         <article class="stat-card"><span>Archived candidate contracts</span><strong>{{ stats.matches }}</strong></article>
-        <article class="stat-card"><span>High-priority historical contracts</span><strong>{{ stats.high_risk }}</strong></article>
-        <article class="stat-card"><span>Active review queue</span><strong>{{ stats.active_matches }}</strong></article>
+        <article class="stat-card"><span>Reviewed historical profiles</span><strong>{{ calibration.reviewed + calibration.legacy_reviewed }}</strong></article>
+        <article class="stat-card"><span>Current review queue</span><strong>{{ materiality_counts.review_today }}</strong></article>
       {% endif %}
     </section>
 
@@ -494,18 +567,22 @@
     <section class="panel">
       <div class="panel-heading">
         <div>
-          <p class="eyebrow">{{ 'Review queue' if view == 'active' else 'Historical intelligence' }}</p>
-          <h3>{{ 'Active candidate contracts' if view == 'active' else 'Archived contracts' }}</h3>
+          <p class="eyebrow">{{ 'Materiality queue' if view == 'active' else 'Historical intelligence' }}</p>
+          <h3>{% if view == 'archive' %}Archived contracts{% elif materiality_gate == 'review_today' %}Contracts warranting review today{% elif materiality_gate == 'observed' %}Observed intelligence{% elif materiality_gate == 'escalate' %}Escalate now{% elif materiality_gate == 'review' %}Review queue{% else %}All active candidate contracts{% endif %}</h3>
           <p class="panel-subcopy">
-            {% if view == 'active' %}
-              Only currently open or upcoming contracts appear here. Review each profile relationship separately so the system can learn which matches are actionable, worth monitoring, informational, or false positives.
+            {% if view == 'active' and materiality_gate == 'review_today' %}
+              These contracts combine a credible risk pathway with a current activation trigger. Lower-materiality matches remain under Observed rather than consuming review capacity.
+            {% elif view == 'active' and materiality_gate == 'observed' %}
+              Relevant contracts retained for monitoring, but no human action is required today unless activity, urgency, rules, or influenceability changes.
+            {% elif view == 'active' %}
+              Active contracts are separated by materiality so a large retrieval library does not become an unworkable alert queue.
             {% else %}
               Historical records are available for research and backtesting only. They have no review or acknowledgement controls.
             {% endif %}
           </p>
         </div>
         <div class="queue-meta">
-          <span>Showing {{ displayed_contract_count }}{% if filtered_contract_count != displayed_contract_count %} of {{ filtered_contract_count }} filtered{% endif %} · {{ stats.matches }} total {{ 'active' if view == 'active' else 'archived' }} contracts</span>
+          <span>Showing {{ displayed_contract_count }}{% if filtered_contract_count != displayed_contract_count %} of {{ filtered_contract_count }} in this view{% endif %} · {{ materiality_counts.all if view == 'active' else stats.matches }} total {{ 'active' if view == 'active' else 'archived' }} contracts</span>
           {% if view == 'active' %}<span>{{ calibration.unreviewed }} profile match{{ '' if calibration.unreviewed == 1 else 'es' }} still unreviewed</span>{% endif %}
           <span class="last-scan">Last scan: {{ stats.last_scan | date }}</span>
         </div>
@@ -513,7 +590,19 @@
 
       <form class="filters" method="get" data-auto-submit-form>
         <input type="hidden" name="view" value="{{ view }}">
+        {% if view == 'archive' %}<input type="hidden" name="gate" value="all">{% endif %}
         {% if include_demo %}<input type="hidden" name="include_demo" value="true">{% endif %}
+        {% if view == 'active' %}
+          <label>Materiality queue
+            <select name="gate" data-auto-submit>
+              <option value="review_today" {{ 'selected' if materiality_gate == 'review_today' else '' }}>Review today</option>
+              <option value="escalate" {{ 'selected' if materiality_gate == 'escalate' else '' }}>Escalate now</option>
+              <option value="review" {{ 'selected' if materiality_gate == 'review' else '' }}>Review only</option>
+              <option value="observed" {{ 'selected' if materiality_gate == 'observed' else '' }}>Observed only</option>
+              <option value="all" {{ 'selected' if materiality_gate == 'all' else '' }}>All active</option>
+            </select>
+          </label>
+        {% endif %}
         <label>Organization / theme
           <select name="organization" data-auto-submit>
             <option value="">All profiles</option>
@@ -533,7 +622,7 @@
             </optgroup>
           </select>
         </label>
-        <label>Severity
+        <label>Retrieval severity
           <select name="severity" data-auto-submit>
             <option value="">All</option>
             {% for item in ['critical', 'high', 'medium', 'low'] %}
@@ -596,13 +685,13 @@
                     <div class="alert-title-row">
                       <span class="source-badge">{{ group.source }}</span>
                       <span class="series-badge">{{ group.count }} related contracts</span>
-                      <span class="severity-badge group-severity-{{ group.severity }}">{{ group.severity }}</span>
+                      <span class="materiality-badge materiality-{{ group.materiality.gate or 'observed' }}">{{ group.materiality.gate_label or 'Observed' }}</span>
                     </div>
                     <strong>{{ group.title }}</strong>
                     <p>{{ group.organizations | join(' · ') }}</p>
                   </div>
                   <div class="series-metrics">
-                    <span>Highest score <strong>{{ group.risk_score }}/100</strong></span>
+                    <span>Highest materiality <strong>{{ group.materiality.materiality_score or 0 }}/100</strong></span>
                     <span>Nearest close <strong>{{ group.nearest_close | date }}</strong></span>
                   </div>
                 </summary>
@@ -617,7 +706,7 @@
         </div>
       {% else %}
         <div class="empty-state">
-          <strong>No {{ 'active' if view == 'active' else 'archived' }} contracts match this view.</strong>
+          <strong>No contracts match this materiality view.</strong>
           {% if view == 'active' and filters.organization and selected_profile_enabled %}
             <p>{{ filters.organization }} is enabled in the watchlist, but no active stored contract currently matches this profile. Run a live scan to check for newly listed markets; historical matches remain under Archive.</p>
           {% else %}

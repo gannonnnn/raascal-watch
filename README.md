@@ -23,6 +23,52 @@ The company named in the market is not always the only party exposed. An organiz
 
 RaaScal Watch is intended to surface that changed incentive environment before the signal is accepted at face value.
 
+## Version 0.8: materiality gates and App Store ranking monitoring
+
+RaaScal Watch now separates the full candidate library from the small set of contracts that warrant human attention today. The default dashboard is no longer a wall of high-scoring matches. It uses three materiality gates:
+
+- **Observed** — relevant intelligence retained without human action today.
+- **Review today** — a credible influence, information, data-dependency, or downstream-impact pathway is paired with a current activation trigger such as material activity, approaching settlement, or market movement.
+- **Escalate now** — strong movement, urgency, economic activity, explicit abuse language, or a narrow pre-public access pathway justifies immediate time-bound triage.
+
+The hero metric is **Contracts warranting review today**. Observed contracts remain searchable, but they no longer compete for reviewer attention or generate ordinary notifications.
+
+Every profile review now answers eight practical questions:
+
+1. How was the relationship established, and is it more than a direct phrase match?
+2. Why does this contract require action now?
+3. Why is the legacy retrieval score 100 rather than 70?
+4. What changed in the latest observation window?
+5. Is the reported economic activity material, using source-appropriate units?
+6. Is there a realistic influence or advance-information pathway?
+7. What should the affected company do differently after receiving the signal?
+8. What percentage of reviewed results were actually labeled Actionable by a human?
+
+The legacy risk score remains visible as a transparent retrieval score with additive components. It does **not** determine the human queue by itself. The materiality gate uses separate dimensions for relationship strength, influenceability, information advantage, economic exposure, settlement urgency, downstream impact, and observed market movement.
+
+Version 0.8 also adds:
+
+- **Apple App Store** as a metric-owner and resolution-source profile;
+- **App Store ranking markets** as a monitored theme; and
+- dynamic extraction of the apps or companies named as outcomes, without requiring a static watchlist entry for each app.
+
+This is designed to surface the operational waterfall behind a ranking market: financially incentivized installs, searches, reviews, or promotion may move a public chart; the affected company may interpret the spike as organic demand; Product, Growth, Engineering, or leadership may then reallocate resources around a false signal.
+
+See `UPDATE_NOTES_V0_8.md` for the gate logic, App Store profile, source-unit handling, migration details, and limitations.
+
+## Version 0.7.2: incremental Kalshi refreshes
+
+RaaScal Watch no longer re-reads the entire Kalshi catalog every 15 minutes after a successful baseline.
+
+- A true first baseline still uses broad open/unopened pagination.
+- Later scans refresh already matched active Kalshi contracts in bounded ticker batches.
+- New-contract discovery uses Kalshi's `min_created_ts` filter with a configurable overlap window.
+- The incremental discovery pass uses smaller pages and a separate safety cap.
+- The officially supported compatibility host is preferred by default on consumer networks, with the dedicated external host retained as automatic fallback.
+- Priority series such as flight-cancellation families are still queried directly before broad discovery.
+
+This reduces request volume substantially while keeping the active review queue and newly created contract discovery current. See `UPDATE_NOTES_V0_7_2.md` for settings and limitations.
+
 ## Version 0.7: Incentive Maps and post-close public visibility
 
 RaaScal Watch now explains the economic and operational pathway behind each surfaced contract, rather than relying on a single priority score. Each matched profile receives an **Incentive Map** showing:
@@ -58,19 +104,6 @@ The dashboard includes a calibration snapshot showing structured-review counts, 
 Reviewer assessments are calibration data, not ground truth. They do not prove abuse, trader intent, or misconduct.
 
 See `UPDATE_NOTES_V0_6.md` for the schema, decision definitions, and migration behavior.
-
-## Version 0.7.2: incremental Kalshi refreshes
-
-RaaScal Watch no longer re-reads the entire Kalshi catalog every 15 minutes after a successful baseline.
-
-- A true first baseline still uses broad open/unopened pagination.
-- Later scans refresh already matched active Kalshi contracts in bounded ticker batches.
-- New-contract discovery uses Kalshi's `min_created_ts` filter with a configurable overlap window.
-- The incremental discovery pass uses smaller pages and a separate safety cap.
-- The officially supported compatibility host is preferred by default on consumer networks, with the dedicated external host retained as automatic fallback.
-- Priority series such as flight-cancellation families are still queried directly before broad discovery.
-
-This reduces request volume substantially while keeping the active review queue and newly created contract discovery current. See `UPDATE_NOTES_V0_7_2.md` for settings and limitations.
 
 ## Version 0.5: topic and dependency-aware monitoring
 

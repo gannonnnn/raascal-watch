@@ -30,7 +30,8 @@
     <section class="field-note-hero">
       <div class="field-note-kicker">
         <span class="source-badge">{{ contract.source }}</span>
-        <span class="severity-badge">{{ review.severity }}</span>
+        <span class="materiality-badge materiality-{{ review.materiality.gate or 'observed' }}">{{ review.materiality.gate_label or 'Observed' }}</span>
+        <span class="severity-badge legacy-severity">Retrieval {{ review.severity }}</span>
         <span>{{ 'ACTIVE' if contract.active else 'ARCHIVED' }}</span>
       </div>
       <p class="field-note-number">RAASCAL WATCH · FIELD NOTE</p>
@@ -38,20 +39,37 @@
       <p class="field-note-contract">{{ contract.title }}</p>
       <div class="field-note-metrics">
         <div><span>Probability</span><strong>{{ contract.probability | probability }}</strong></div>
-        <div><span>Cumulative volume</span><strong>{{ contract.volume | money }}</strong></div>
+        <div><span>Reported activity</span><strong>{{ contract.volume | activity(contract.source) }}</strong></div>
         <div><span>Closes</span><strong>{{ contract.closes_at | date }}</strong></div>
-        <div><span>Profile priority</span><strong>{{ review.risk_score }}/100</strong></div>
+        <div><span>Materiality</span><strong>{{ review.materiality.materiality_score or 0 }}/100</strong></div>
       </div>
       {% if contract.movement and contract.movement.snapshot_count > 1 %}
         <div class="field-note-movement">
           <span>{{ contract.movement.snapshot_count }} stored observations</span>
           {% if contract.movement.deltas.probability is not none %}<strong>{{ (contract.movement.deltas.probability * 100) | round(1) }}-point latest probability move</strong>{% endif %}
-          {% if contract.movement.deltas.volume is not none %}<strong>{{ contract.movement.deltas.volume | money }} latest volume change</strong>{% endif %}
+          {% if contract.movement.deltas.volume is not none %}<strong>{{ contract.movement.deltas.volume | activity_delta(contract.source) }} latest activity change</strong>{% endif %}
         </div>
       {% endif %}
     </section>
 
     {% if map %}
+      {% if review.materiality %}
+        {% set mat = review.materiality %}
+        <section class="field-note-section field-note-materiality">
+          <div class="field-note-section-heading">
+            <span>00</span><div><p>MATERIALITY GATE</p><h2>Why this contract is—or is not—in today’s review queue</h2></div>
+          </div>
+          <div class="field-note-quadrants materiality-note-grid">
+            <article><h3>Why action now?</h3><strong>{{ mat.gate_label }}</strong><p>{{ mat.why_action }}</p></article>
+            <article><h3>How was it connected?</h3><strong>{{ mat.dimensions.relationship.label }}</strong><p>{{ mat.dimensions.relationship.rationale }}</p></article>
+            <article><h3>What changed today?</h3><strong>{{ mat.dimensions.market_movement.label }}</strong><ul>{% for item in mat.what_changed %}<li>{{ item }}</li>{% endfor %}</ul></article>
+            <article><h3>Is the reported activity material?</h3><strong>{{ mat.dimensions.economic_exposure.label }}</strong><ul>{% for item in mat.dimensions.economic_exposure.facts %}<li>{{ item }}</li>{% endfor %}</ul><p class="field-note-small">{{ mat.dimensions.economic_exposure.caveat }}</p></article>
+            <article><h3>Could the outcome be influenced?</h3><strong>{{ mat.dimensions.influenceability.label }}</strong><ul>{% for item in mat.dimensions.influenceability.rationales %}<li>{{ item }}</li>{% endfor %}</ul></article>
+            <article><h3>What should the company do?</h3><strong>{{ mat.response.headline }}</strong><ol>{% for item in mat.response.steps %}<li>{{ item }}</li>{% endfor %}</ol></article>
+          </div>
+          {% if contract.dynamic_subjects %}<p class="field-note-small"><strong>Dynamic subjects:</strong> {{ contract.dynamic_subjects | join(', ') }}</p>{% endif %}
+        </section>
+      {% endif %}
       <section class="field-note-section">
         <div class="field-note-section-heading">
           <span>01</span><div><p>ECONOMIC INCENTIVE</p><h2>Who benefits? What is the potential upside?</h2></div>

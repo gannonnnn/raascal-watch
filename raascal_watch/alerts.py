@@ -66,6 +66,9 @@ def build_payload(market: MarketRecord, match: MatchResult) -> dict[str, Any]:
         "recommended_stakeholders": match.stakeholders,
         "recommended_actions": match.actions,
         "incentive_map": match.incentive_map,
+        "materiality": match.materiality,
+        "risk_breakdown": match.risk_breakdown,
+        "dynamic_subjects": match.dynamic_subjects,
         "market": {
             "source": market.source,
             "external_id": market.external_id,
@@ -92,10 +95,15 @@ def build_plain_text(market: MarketRecord, match: MatchResult) -> str:
     stakeholders = ", ".join(match.stakeholders) or "Risk"
     incentive = match.incentive_map or {}
     headline = incentive.get("headline") or "A financial incentive is attached to this outcome."
+    materiality = match.materiality or {}
+    gate_label = materiality.get("gate_label") or "Observed"
+    why_action = materiality.get("why_action") or "No current human-review trigger was identified."
     public_visibility = (incentive.get("public_traceability") or {}).get("label") or "Unknown"
     return f"""RaaScal Watch alert: {match.organization}
 
-Severity: {match.severity.upper()} ({match.risk_score}/100)
+Materiality: {gate_label} ({materiality.get('materiality_score', 0)}/100)
+Why now: {why_action}
+Retrieval severity: {match.severity.upper()} ({match.risk_score}/100)
 Match basis: {match.match_basis.replace('_', ' ').title()}
 Source: {market.source}
 Contract: {market.title}

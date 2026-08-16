@@ -183,6 +183,28 @@ def command_lifecycle_summary(_: argparse.Namespace) -> int:
     )
     return 0
 
+
+
+def command_materiality_summary(_: argparse.Namespace) -> int:
+    settings = get_settings()
+    database = Database(settings.db_path)
+    database.initialize()
+    result = database.list_contract_groups(
+        include_demo=False,
+        view="active",
+        materiality_gate="all",
+        limit=1,
+    )
+    counts = result["gate_counts"]
+    print(
+        "Materiality queue: "
+        f"{counts['review_today']} contract(s) warrant review today "
+        f"({counts['escalate']} escalate / {counts['review']} review); "
+        f"{counts['observed']} observed without human action; "
+        f"{counts['all']} total active candidate contract(s)."
+    )
+    return 0
+
 def command_calibration_summary(_: argparse.Namespace) -> int:
     settings = get_settings()
     database = Database(settings.db_path)
@@ -286,6 +308,9 @@ def command_export(args: argparse.Namespace) -> int:
             "reasons",
             "actions",
             "incentive_map",
+            "risk_breakdown",
+            "materiality",
+            "dynamic_subjects",
         ]
         with output.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)
@@ -432,6 +457,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show structured-review and unreviewed profile-match counts",
     )
     calibration.set_defaults(func=command_calibration_summary)
+
+    materiality = subparsers.add_parser(
+        "materiality-summary",
+        help="Show Review today, Escalate, Review, and Observed contract counts",
+    )
+    materiality.set_defaults(func=command_materiality_summary)
 
     validate = subparsers.add_parser("validate-config", help="Validate the YAML watchlist")
     validate.set_defaults(func=command_validate)

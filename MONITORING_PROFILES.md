@@ -1,6 +1,24 @@
 # RaaScal Watch monitoring profiles
 
-RaaScal Watch treats every result as a **candidate match**, not proof of abuse. Version 0.5 separates organization relationships from monitored topics.
+RaaScal Watch treats every result as a **candidate match**, not proof of abuse. Version 0.8 separates broad observed intelligence from contracts that warrant human review today.
+
+## App Store ranking markets — monitored theme
+
+**What is monitored:** public App Store chart and ranking contracts, including top U.S. iPhone app, top free app, top paid app, number-one app, ranking, download, install, rating, and review outcomes.
+
+**Why it matters:** an outside financial incentive can encourage paid or coordinated installs, searches, reviews, promotion, competitor suppression, or other concentrated activity around the settlement window. A small company may interpret the resulting ranking spike as organic demand and redirect Product, Growth, Engineering, hiring, or marketing resources.
+
+**Dynamic subjects:** the app or company named as each outcome is extracted from source metadata and displayed on the contract. A dynamic subject is descriptive; it is not automatically treated as a permanent watchlist organization or evidence of misconduct.
+
+**Likely owners:** Growth, Product Analytics, Fraud, Trust & Safety, and App Store Integrity.
+
+## Apple App Store — metric owner and resolution source
+
+**What is monitored:** contracts that explicitly use Apple App Store Top Charts, Top Free Apps, Top Paid Apps, category rankings, or related public chart data to determine settlement.
+
+**Why it matters:** Apple may be the public metric owner and settlement source even when a different app is the named subject. The ranking itself can become both a financial oracle and a signal that affected app companies use for acquisition, product, and roadmap decisions.
+
+**Likely owners:** App Store Integrity, Fraud, Product Analytics, Developer Relations, Data Science, and Legal.
 
 ## Flight cancellation markets — monitored theme
 

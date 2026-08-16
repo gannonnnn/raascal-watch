@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 — Materiality gates and App Store ranking monitoring
+
+- Added **Observed**, **Review today**, and **Escalate now** materiality gates so broad candidate retrieval no longer becomes the default human queue.
+- Replaced the primary active-candidate count with **Contracts warranting review today** and retained lower-materiality results under Observed.
+- Added deterministic dimensions for relationship evidence, influenceability, information advantage, economic exposure, settlement urgency, downstream impact, and market movement.
+- Added a transparent legacy retrieval-score breakdown so a 100/100 score can be traced to additive components and distinguished from the materiality decision.
+- Added latest/approximately 24-hour probability, volume, open-interest, rule, status, and close-time change analysis from stored snapshots.
+- Added source-aware economic context: Kalshi volume/open interest are displayed as contract counts, while Polymarket values retain reported currency context.
+- Added gate-aware next steps and ordinary notification suppression for newly observed contracts that do not warrant human review.
+- Added **Apple App Store** as a metric-owner / resolution-source profile and **App Store ranking markets** as a monitored theme.
+- Added dynamic extraction of changing app/company outcomes from App Store ranking listings.
+- Added App Store-specific influence and downstream-cost guidance, including install quality, paid acquisition, reviews, ranking movement, retention, and false product-demand signals.
+- Added a direct human-confirmed actionable rate to reviewer calibration.
+- Added `raascal-watch materiality-summary` and materiality/risk/dynamic-subject fields to standard exports.
+- Added SQLite migrations for materiality analysis, risk-score breakdowns, dynamic subjects, close-time history, and rule hashes while preserving existing data and reviews.
+- Added automated coverage for gate separation, movement promotion, source units, App Store profiles, dynamic subjects, UI explanation, snapshots, and CLI summaries.
+
 ## 0.7.2 — Incremental Kalshi refreshes
 
 - Prefer Kalshi's officially supported compatibility host on consumer networks while retaining automatic host failover.

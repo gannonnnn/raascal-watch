@@ -59,9 +59,33 @@ A known FlightAware-dependent contract can carry both profiles while appearing o
 
 The Kalshi collector directly queries series referenced by dependency rules, so the weekly `KXUSFLYCAN` family and discovered `KXFLYCANC...` airport series are not dependent on their position in the broad market pagination.
 
-## Active queue and archive
+## Materiality queue, active contracts, and archive
 
-The default page shows only active contracts. Closed or expired contracts are retained under the separate **Archive** tab and have no review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
+The default page opens on **Review today**, not the complete active library. RaaScal Watch uses:
+
+- **Escalate now** for the strongest time-bound signals;
+- **Review today** for contracts with a credible pathway and current activation trigger;
+- **Observed** for relevant intelligence that does not require human action today; and
+- **All active** when a reviewer intentionally wants the full candidate library.
+
+Closed or expired contracts are retained under the separate **Archive** tab and have no current-review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
+
+Run a quick queue summary from Terminal with:
+
+```bash
+raascal-watch materiality-summary
+```
+
+## App Store ranking monitoring
+
+Use the profile filter in two complementary ways:
+
+- Select **App Store ranking markets — theme** to see active contracts tied to public App Store chart outcomes.
+- Select **Apple App Store** to review the platform as metric owner and potential resolution source.
+
+RaaScal Watch extracts changing app/company outcomes dynamically and displays them as **Dynamic subjects / outcomes** on the contract card. It does not automatically create a permanent organization profile or accuse the named app of manipulation.
+
+The tailored guidance asks whether ranking movement reflects durable users or concentrated paid, coordinated, automated, review-driven, or low-retention activity before Product, Growth, Engineering, or leadership treats the signal as organic demand.
 
 ## Incentive Maps, Field Notes, and post-close review
 

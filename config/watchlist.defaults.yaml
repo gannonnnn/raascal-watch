@@ -1,4 +1,4 @@
-version: 5
+version: 7
 organizations:
 - name: Spotify
   enabled: true
@@ -355,6 +355,132 @@ organizations:
   - Compare market creation and odds movement with deployment, status, benchmark, pricing, and announcement timelines.
   - Preserve the contract and supporting telemetry without treating a prediction or position as evidence of misconduct.
   profile_type: organization
+- name: Apple App Store
+  enabled: true
+  aliases:
+  - Apple App Store
+  - iOS App Store
+  - iPhone App Store
+  - App Store Top Charts
+  products:
+  - Apple Top Charts
+  - Top Free Apps
+  - Top Paid Apps
+  - Top Grossing Apps
+  executives: []
+  metrics:
+  - app store ranking
+  - app ranking
+  - top app
+  - number one app
+  - top free app
+  - top paid app
+  - downloads
+  - installs
+  - ratings
+  - reviews
+  - category ranking
+  - chart position
+  stakeholders:
+  - App Store Integrity
+  - Fraud
+  - Product Analytics
+  - Developer Relations
+  - Data Science
+  - Legal
+  playbook:
+  - Confirm the exact App Store chart, geography, category, device, and observation time used to settle the contract.
+  - Compare ranking movement with install source, retention, geography, device concentration, paid acquisition, search activity, and review velocity.
+  - Warn Product, Growth, and leadership not to treat a market-linked ranking spike as durable demand until cohort quality is validated.
+  profile_type: organization
+  dependency_rules:
+  - name: Kalshi top U.S. iPhone app markets
+    source: kalshi
+    terms:
+    - top US iPhone app
+    - top U.S. iPhone app
+    - top iphone app tomorrow
+    - highest ranking app
+    - number one iPhone app
+    - top free app
+    - top paid app
+    evidence_terms:
+    - App Store Top Charts
+    - Top Free Apps
+    - Apple App Store
+    confidence: verified
+    theme: App Store ranking markets
+    categories:
+    - popularity_and_ranking
+    - engagement_manipulation
+    - oracle_and_data_dependency
+    evidence: Kalshi's published Top App market rules use Apple App Store Top Charts as the resolution source.
+  - name: Public App Store ranking settlement language
+    terms:
+    - Apple App Store ranking
+    - App Store ranking
+    - App Store Top Charts
+    - top free apps
+    - top paid apps
+    confidence: verified
+    theme: App Store ranking markets
+    categories:
+    - popularity_and_ranking
+    - engagement_manipulation
+    - oracle_and_data_dependency
+    evidence: The contract explicitly relies on an Apple App Store chart or ranking to determine settlement.
+- name: App Store ranking markets
+  profile_type: theme
+  enabled: true
+  aliases:
+  - top US iPhone app
+  - top U.S. iPhone app
+  - top iphone app tomorrow
+  - app store ranking
+  - Apple App Store ranking
+  - App Store Top Charts
+  - top free app
+  - top paid app
+  - highest ranking app
+  - number one iPhone app
+  - #1 iPhone app
+  products: []
+  executives: []
+  metrics:
+  - downloads
+  - installs
+  - app ranking
+  - chart position
+  - paid acquisition
+  - ratings
+  - reviews
+  - search ranking
+  stakeholders:
+  - Growth
+  - Product Analytics
+  - Fraud
+  - Trust & Safety
+  - App Store Integrity
+  playbook:
+  - Extract the app or company named as each outcome and identify which team owns acquisition, analytics, and product prioritization.
+  - Test whether ranking movement came from durable users or concentrated paid, coordinated, automated, or low-retention activity.
+  - Add a caveat to internal dashboards before Engineering, Growth, or leadership reallocates resources around the apparent demand signal.
+  dependency_rules:
+  - name: App Store ranking contract language
+    terms:
+    - top US iPhone app
+    - top U.S. iPhone app
+    - top iphone app tomorrow
+    - app store ranking
+    - App Store Top Charts
+    - top free app
+    - top paid app
+    confidence: verified
+    categories:
+    - popularity_and_ranking
+    - engagement_manipulation
+    - oracle_and_data_dependency
+    evidence: The market settles from a public App Store ranking or chart and can create a financially incentivized demand signal around the named app.
 - name: Example Company
   enabled: false
   aliases:
@@ -389,6 +515,10 @@ risk_categories:
     - bestseller
     - award
     - win an award
+    - top free app
+    - top paid app
+    - top iphone app
+    - app store ranking
     stakeholders:
     - Product Analytics
     - Trust & Safety
@@ -417,6 +547,9 @@ risk_categories:
     - subscriber count
     - impressions
     - concurrent viewers
+    - app installs
+    - app downloads
+    - incentivized installs
     stakeholders:
     - Fraud
     - Trust & Safety
@@ -470,6 +603,10 @@ risk_categories:
     - public subscriber count
     - Cloudflare Radar
     - status page
+    - Apple App Store
+    - App Store Top Charts
+    - Top Free Apps
+    - Top Paid Apps
     stakeholders:
     - Legal
     - Data Governance

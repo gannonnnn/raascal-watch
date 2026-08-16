@@ -182,6 +182,10 @@ class Scanner:
                 else:
                     initial_state = "pending"
 
+                materiality_gate = str((match.materiality or {}).get("gate") or "observed")
+                if initial_state == "pending" and materiality_gate == "observed":
+                    initial_state = "observed"
+
                 match_id, match_is_new = self.database.upsert_match(
                     market_id,
                     match,
@@ -197,6 +201,7 @@ class Scanner:
                     or (
                         not baseline
                         and not suppress_for_error
+                        and materiality_gate in {"review", "escalate"}
                         and (
                             market_is_new
                             or self.settings.alert_on_new_match_for_existing_market

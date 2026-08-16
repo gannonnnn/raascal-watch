@@ -50,6 +50,7 @@ templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 
 _ALLOWED_VIEWS = {"active", "archive"}
 _ALLOWED_SORTS = {"priority", "review", "closing", "volume", "newest"}
+_ALLOWED_GATES = {"review_today", "escalate", "review", "observed", "all"}
 
 
 def _format_date(value: str | None) -> str:
@@ -96,12 +97,37 @@ def _format_delta(value: float | None, *, percentage_points: bool = False) -> st
     return f"{value:+,.0f}"
 
 
+def _format_activity(value: float | None, source: str | None = None) -> str:
+    if value is None:
+        return "—"
+    if (source or "").casefold() == "kalshi":
+        magnitude = abs(value)
+        sign = "-" if value < 0 else ""
+        if magnitude >= 1_000_000:
+            return f"{sign}{magnitude / 1_000_000:.2f}M contracts"
+        if magnitude >= 1_000:
+            return f"{sign}{magnitude / 1_000:.1f}K contracts"
+        return f"{sign}{magnitude:,.0f} contracts"
+    return _format_money(value)
+
+
+def _format_activity_delta(value: float | None, source: str | None = None) -> str:
+    if value is None:
+        return "—"
+    if (source or "").casefold() == "kalshi":
+        return f"{value:+,.0f} contracts"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{_format_money(value)}"
+
+
 templates.env.filters["date"] = _format_date
 templates.env.filters["money"] = _format_money
 templates.env.filters["probability"] = _format_probability
 templates.env.filters["cents"] = _format_cents
 templates.env.filters["number"] = _format_number
 templates.env.filters["delta"] = _format_delta
+templates.env.filters["activity"] = _format_activity
+templates.env.filters["activity_delta"] = _format_activity_delta
 
 
 def _normalize_view(value: str | None) -> str:
@@ -117,6 +143,13 @@ def _normalize_sort(value: str | None) -> str:
 def _normalize_scope_view(value: str | None, *, default: str = "active") -> str:
     clean = (value or default).strip().lower()
     return clean if clean in {"active", "archive", "all"} else default
+
+
+def _normalize_gate(value: str | None, *, view: str = "active") -> str:
+    if view == "archive":
+        return "all"
+    clean = (value or "review_today").strip().lower()
+    return clean if clean in _ALLOWED_GATES else "review_today"
 
 
 def _dashboard_url(request: Request, **changes: str | None) -> str:
@@ -184,6 +217,7 @@ async def dashboard(
     source: str | None = Query(default=None),
     alert_state: str | None = Query(default=None),
     review_decision: str | None = Query(default=None),
+    gate: str = Query(default="review_today"),
     sort: str = Query(default="priority"),
     view: str = Query(default="active"),
     include_demo: bool = Query(default=False),
@@ -191,6 +225,7 @@ async def dashboard(
     database.initialize()
     normalized_view = _normalize_view(view)
     normalized_sort = _normalize_sort(sort)
+    normalized_gate = _normalize_gate(gate, view=normalized_view)
 
     # Normal review is active-only. Historical contracts remain available in an
     # explicit archive but cannot be acknowledged or reviewed as current work.
@@ -207,6 +242,7 @@ async def dashboard(
         include_demo=include_demo,
         view=normalized_view,
         sort=normalized_sort,
+        materiality_gate=normalized_gate,
     )
     scans = database.recent_scans(12, include_demo=include_demo)
 
@@ -242,6 +278,7 @@ async def dashboard(
         "source": source or "",
         "alert_state": alert_state or "",
         "review_decision": review_decision or "",
+        "gate": normalized_gate,
         "sort": normalized_sort,
     }
     chip_labels = {
@@ -271,6 +308,7 @@ async def dashboard(
         "alert_state": None,
         "review_decision": None,
         "sort": None,
+        "gate": normalized_gate,
         "view": normalized_view,
     }
 
@@ -280,6 +318,8 @@ async def dashboard(
         context={
             "stats": stats,
             "calibration": calibration,
+            "materiality_counts": result["gate_counts"],
+            "materiality_gate": normalized_gate,
             "contract_groups": result["groups"],
             "displayed_contract_count": len(result["contracts"]),
             "filtered_contract_count": result["total"],
@@ -309,13 +349,26 @@ async def dashboard(
             "view": normalized_view,
             "filters": filter_values,
             "active_filter_chips": active_filter_chips,
+            "gate_labels": {
+                "review_today": "Review today",
+                "escalate": "Escalate now",
+                "review": "Review",
+                "observed": "Observed",
+                "all": "All active",
+            },
             "review_decisions": REVIEW_DECISIONS,
             "review_decision_labels": REVIEW_DECISION_LABELS,
             "review_reason_groups": REVIEW_REASON_GROUPS,
             "guidance_ratings": GUIDANCE_RATINGS,
             "guidance_rating_labels": GUIDANCE_RATING_LABELS,
-            "active_url": _dashboard_url(
-                request, view="active", alert_state=None, review_decision=None
+            "review_today_url": _dashboard_url(
+                request, view="active", gate="review_today", alert_state=None, review_decision=None
+            ),
+            "observed_url": _dashboard_url(
+                request, view="active", gate="observed", alert_state=None, review_decision=None
+            ),
+            "all_active_url": _dashboard_url(
+                request, view="active", gate="all", alert_state=None, review_decision=None
             ),
             "archive_url": _dashboard_url(
                 request,
@@ -323,6 +376,7 @@ async def dashboard(
                 alert_state=None,
                 review_decision=None,
                 sort="priority",
+                gate="all",
             ),
             "clear_url": _dashboard_url(request, **clear_params),
         },
@@ -359,6 +413,7 @@ async def api_contracts(
     source: str | None = None,
     alert_state: str | None = None,
     review_decision: str | None = None,
+    gate: str = "review_today",
     sort: str = "priority",
     view: str = "active",
     include_demo: bool = False,
@@ -370,6 +425,7 @@ async def api_contracts(
         source=source,
         alert_state=alert_state,
         review_decision=review_decision,
+        materiality_gate=_normalize_gate(gate, view=_normalize_view(view)),
         sort=_normalize_sort(sort),
         view=_normalize_view(view),
         include_demo=include_demo,
@@ -550,6 +606,9 @@ async def acknowledge_contract(market_id: int) -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     stats = database.dashboard_stats(include_demo=False, view="active")
     feedback = database.feedback_summary(include_demo=False, view="active")
+    materiality = database.list_contract_groups(
+        include_demo=False, view="active", materiality_gate="all", limit=1
+    )["gate_counts"]
     return {
         "status": "ok",
         "scanner_running": scanner.is_running,
@@ -558,6 +617,9 @@ async def health() -> dict[str, Any]:
         "archived_candidate_contracts": stats["archive_matches"],
         "reviewed_profile_matches": feedback["reviewed"],
         "unreviewed_profile_matches": feedback["unreviewed"],
+        "contracts_warranting_review_today": materiality["review_today"],
+        "contracts_to_escalate": materiality["escalate"],
+        "observed_contracts": materiality["observed"],
         "enabled_sources": [collector.name for collector in scanner.collectors],
         "database": str(settings.db_path),
     }

@@ -121,6 +121,9 @@ class MatchResult:
     stakeholders: list[str]
     actions: list[str]
     incentive_map: dict[str, Any] = field(default_factory=dict)
+    risk_breakdown: dict[str, Any] = field(default_factory=dict)
+    materiality: dict[str, Any] = field(default_factory=dict)
+    dynamic_subjects: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

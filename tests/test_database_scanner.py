@@ -71,6 +71,51 @@ def test_first_scan_is_baseline_then_new_contract_alerts(tmp_path: Path) -> None
     assert states["second"] == "console_only"
 
 
+def test_observed_new_match_is_stored_without_notification(tmp_path: Path) -> None:
+    settings = replace(
+        get_settings(),
+        db_path=tmp_path / "observed.db",
+        watchlist_path=ROOT / "config" / "watchlist.yaml",
+        run_scan_on_startup=False,
+        slack_webhook_url=None,
+        generic_webhook_url=None,
+        smtp_host=None,
+        smtp_from=None,
+        smtp_to=(),
+    )
+    database = Database(settings.db_path)
+    scanner = Scanner(settings, database, collectors=[])
+
+    # Establish the source baseline first.
+    asyncio.run(
+        scanner.scan_records(
+            "fake",
+            [make_market("baseline-review", "Will Spotify streams reach a new chart record?")],
+        )
+    )
+
+    observed = MarketRecord(
+        source="fake",
+        external_id="observed-only",
+        title="Will Spotify attend an industry conference in 2028?",
+        description="Resolves from publicly available event information.",
+        created_at=datetime.now(timezone.utc),
+        closes_at=datetime.now(timezone.utc) + timedelta(days=500),
+        probability=0.5,
+        volume=0,
+        liquidity=0,
+    )
+    result = asyncio.run(scanner.scan_records("fake", [observed]))
+
+    assert result.sources[0].new_markets == 1
+    assert result.sources[0].notifications == 0
+    row = next(
+        item for item in database.list_matches() if item["external_id"] == "observed-only"
+    )
+    assert row["materiality"]["gate"] == "observed"
+    assert row["alert_state"] == "observed"
+
+
 def test_acknowledgement_updates_queue(tmp_path: Path) -> None:
     database = Database(tmp_path / "test.db")
     database.initialize()

@@ -115,6 +115,69 @@ def test_contract_card_combines_multi_organization_matches(tmp_path: Path) -> No
     assert contract["title"] == "Will MrBeast's next YouTube video reach 100 million views?"
 
 
+def test_organization_filter_uses_that_profiles_materiality_gate(tmp_path: Path) -> None:
+    import json
+
+    settings = settings_for(tmp_path)
+    database = Database(settings.db_path)
+    scanner = Scanner(settings, database, collectors=[])
+    market = MarketRecord(
+        source="polymarket",
+        external_id="profile-gate-filter",
+        title="MrBeast YouTube views — Will MrBeast's next YouTube video reach 100 million views?",
+        description="Resolves from the public YouTube view counter.",
+        status="open",
+        closes_at=datetime.now(timezone.utc) + timedelta(days=5),
+        probability=0.5,
+        volume=250_000,
+    )
+    asyncio.run(scanner.scan_records("polymarket", [market]))
+
+    low_dimensions = {
+        "relationship": {"score": 75, "band": "high", "label": "Direct relationship", "rationale": "Test"},
+        "influenceability": {"score": 20, "band": "minimal", "label": "Minimal potential", "rationales": []},
+        "information_advantage": {"score": 20, "band": "minimal", "label": "Minimal potential", "rationales": []},
+        "economic_exposure": {"score": 20, "band": "minimal", "label": "Minimal activity", "facts": [], "caveat": ""},
+        "settlement_urgency": {"score": 20, "band": "minimal", "label": "Not urgent"},
+        "downstream_impact": {"score": 20, "band": "minimal", "label": "Minimal potential", "rationales": []},
+        "market_movement": {"score": 0, "band": "minimal", "label": "No comparison", "changes": []},
+    }
+    low_materiality = {
+        "gate": "observed",
+        "gate_label": "Observed",
+        "materiality_score": 25,
+        "dimensions": low_dimensions,
+        "drivers": ["Test observed relationship"],
+        "why_action": "Test observed relationship",
+        "what_changed": [],
+        "response": {"headline": "Observe", "owners": [], "steps": []},
+    }
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE matches SET materiality_json = ? WHERE organization = ?",
+            (json.dumps(low_materiality), "YouTube"),
+        )
+
+    youtube_review = database.list_contract_groups(
+        organization="YouTube", materiality_gate="review_today"
+    )
+    youtube_observed = database.list_contract_groups(
+        organization="YouTube", materiality_gate="observed"
+    )
+    beast_review = database.list_contract_groups(
+        organization="MrBeast / Beast Industries", materiality_gate="review_today"
+    )
+
+    assert youtube_review["contracts"] == []
+    assert [item["external_id"] for item in youtube_observed["contracts"]] == [
+        "profile-gate-filter"
+    ]
+    assert youtube_observed["contracts"][0]["filtered_organizations"] == ["YouTube"]
+    assert [item["external_id"] for item in beast_review["contracts"]] == [
+        "profile-gate-filter"
+    ]
+
+
 def test_related_thresholds_are_grouped_under_one_event(tmp_path: Path) -> None:
     settings = settings_for(tmp_path)
     database = Database(settings.db_path)
@@ -203,7 +266,8 @@ def test_template_uses_auto_submit_and_separate_archive_view() -> None:
     assert '<optgroup label="Organizations">' in template
     assert '<optgroup label="Monitored themes">' in template
     assert "Filter results</button>" not in template
-    assert "Active review queue" in template
+    assert "Review today" in template
+    assert "Contracts warranting review today" in template
     assert "Historical records are available for research and backtesting only" in template
     assert "/api/contracts/${marketId}/acknowledge" in script
 
@@ -231,14 +295,14 @@ def test_dashboard_routes_keep_expired_contracts_out_of_review(tmp_path: Path, m
     monkeypatch.setattr(app_module, "scanner", scanner)
 
     with TestClient(app_module.app) as client:
-        active = client.get("/")
+        active = client.get("/?gate=all")
         archive = client.get("/?view=archive")
 
     assert active.status_code == 200
     assert "web-active" in active.text
     assert "web-expired" not in active.text
-    assert "Review guidance and record an assessment" in active.text
+    assert "Why this warrants attention—and what to do next" in active.text
     assert archive.status_code == 200
     assert "web-expired" in archive.text
-    assert "Review guidance and record an assessment" not in archive.text
+    assert "Why this warrants attention—and what to do next" not in archive.text
     assert "Mark reviewed" not in archive.text
