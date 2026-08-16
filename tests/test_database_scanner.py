@@ -233,3 +233,183 @@ def test_existing_match_guidance_can_refresh_without_changing_seen_time(tmp_path
     assert after["match_last_seen_at"] == before["match_last_seen_at"]
     assert after["roles"]
     assert after["review_questions"]
+
+
+def test_database_migrates_incentive_and_snapshot_schema(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "legacy-v06.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id INTEGER NOT NULL,
+            organization TEXT NOT NULL,
+            matched_identity_terms_json TEXT NOT NULL DEFAULT '[]',
+            matched_metric_terms_json TEXT NOT NULL DEFAULT '[]',
+            categories_json TEXT NOT NULL DEFAULT '[]',
+            risk_score INTEGER NOT NULL,
+            severity TEXT NOT NULL,
+            match_basis TEXT NOT NULL DEFAULT 'direct',
+            roles_json TEXT NOT NULL DEFAULT '[]',
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            review_questions_json TEXT NOT NULL DEFAULT '[]',
+            stakeholders_json TEXT NOT NULL DEFAULT '[]',
+            actions_json TEXT NOT NULL DEFAULT '[]',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            alert_state TEXT NOT NULL DEFAULT 'new',
+            notified_at TEXT,
+            acknowledged_at TEXT,
+            UNIQUE(market_id, organization)
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connect() as migrated:
+        columns = {row["name"] for row in migrated.execute("PRAGMA table_info(matches)")}
+        tables = {
+            row["name"]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "incentive_map_json" in columns
+    assert "market_snapshots" in tables
+    assert "public_exposure_snapshots" in tables
+
+
+def test_scanner_persists_incentive_map_and_market_movement(tmp_path: Path) -> None:
+    settings = replace(
+        get_settings(),
+        db_path=tmp_path / "movement.db",
+        watchlist_path=ROOT / "config" / "watchlist.yaml",
+        run_scan_on_startup=False,
+    )
+    database = Database(settings.db_path)
+    scanner = Scanner(settings, database, collectors=[])
+    first = make_market("movement-one", "Will Spotify reach 330 million subscribers?")
+    first.probability = 0.25
+    first.volume = 10_000
+    asyncio.run(scanner.scan_records("fake", [first]))
+
+    second = make_market("movement-one", "Will Spotify reach 330 million subscribers?")
+    second.probability = 0.4
+    second.volume = 25_000
+    asyncio.run(scanner.scan_records("fake", [second]))
+
+    contract = database.list_contract_groups()["contracts"][0]
+    assert contract["reviews"][0]["incentive_map"]["benefit_sides"]
+    assert contract["movement"]["snapshot_count"] == 2
+    assert round(contract["movement"]["deltas"]["probability"], 2) == 0.15
+    assert contract["movement"]["deltas"]["volume"] == 15_000
+
+
+def test_public_exposure_snapshot_round_trips_rich_position_data(tmp_path: Path) -> None:
+    settings = replace(
+        get_settings(),
+        db_path=tmp_path / "exposure.db",
+        watchlist_path=ROOT / "config" / "watchlist.yaml",
+        run_scan_on_startup=False,
+    )
+    database = Database(settings.db_path)
+    scanner = Scanner(settings, database, collectors=[])
+    asyncio.run(
+        scanner.scan_records(
+            "polymarket",
+            [make_market("exposure-market", "Will Spotify reach 330 million subscribers?")],
+        )
+    )
+    market_id = database.list_contract_groups()["contracts"][0]["market_id"]
+    saved = database.save_public_exposure_snapshot(
+        market_id,
+        {
+            "source": "polymarket",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "visibility": "wallet_level",
+            "visibility_label": "Public wallet-level exposure",
+            "condition_id": "0x" + "d" * 64,
+            "open_interest": 5_000,
+            "position_groups": [
+                {
+                    "outcome": "Yes",
+                    "positions": [
+                        {
+                            "wallet": "0x" + "e" * 40,
+                            "display_name": "Public wallet",
+                            "size": 100,
+                            "average_price": 0.2,
+                            "total_pnl": 50,
+                        }
+                    ],
+                }
+            ],
+            "holder_groups": [],
+            "recent_trades": [],
+            "detail": "Public position data",
+            "caveat": "Profit is not proof.",
+        },
+    )
+
+    assert saved["snapshot_id"]
+    loaded = database.latest_public_exposure(market_id)
+    assert loaded is not None
+    assert loaded["position_groups"][0]["positions"][0]["total_pnl"] == 50
+    assert database.get_contract_bundle(market_id)["public_exposure"]["open_interest"] == 5_000
+
+
+def test_scanner_passes_source_context_for_incremental_collectors(tmp_path: Path) -> None:
+    from raascal_watch.models import CollectorContext, SourceFetchResult
+
+    settings = replace(
+        get_settings(),
+        db_path=tmp_path / "context.db",
+        watchlist_path=ROOT / "config" / "watchlist.yaml",
+        run_scan_on_startup=False,
+        slack_webhook_url=None,
+        generic_webhook_url=None,
+        smtp_host=None,
+        smtp_from=None,
+        smtp_to=(),
+    )
+    database = Database(settings.db_path)
+    seed_scanner = Scanner(settings, database, collectors=[])
+    asyncio.run(
+        seed_scanner.scan_records(
+            "kalshi",
+            [
+                MarketRecord(
+                    source="kalshi",
+                    external_id="KXCONTEXT-1",
+                    title="Will Spotify streams rise?",
+                    closes_at=datetime.now(timezone.utc) + timedelta(days=5),
+                    status="open",
+                )
+            ],
+        )
+    )
+
+    captured: list[CollectorContext | None] = []
+
+    class RecordingCollector:
+        name = "kalshi"
+
+        async def fetch(self, client, settings, context=None):
+            captured.append(context)
+            return SourceFetchResult("kalshi", [], pages=0)
+
+    scanner = Scanner(settings, database, collectors=[RecordingCollector()])
+    asyncio.run(scanner.scan())
+
+    assert len(captured) == 1
+    context = captured[0]
+    assert context is not None
+    assert context.source_initialized is True
+    assert context.last_success_at is not None
+    assert context.active_external_ids == ("KXCONTEXT-1",)

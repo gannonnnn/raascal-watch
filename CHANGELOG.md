@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.2 — Incremental Kalshi refreshes
+
+- Prefer Kalshi's officially supported compatibility host on consumer networks while retaining automatic host failover.
+- After the first successful baseline, discover only newly created open and unopened contracts using a timestamp overlap.
+- Refresh already matched active Kalshi contracts in bounded ticker batches so probability, volume, status, and close times remain current.
+- Avoid re-reading roughly 100,000 Kalshi catalog records every 15 minutes.
+- Preserve full-catalog pagination for a true first baseline or an explicit baseline reset.
+- Add source-context tests and database helpers for incremental collectors.
+
+## 0.7.1 — Source refresh resilience
+
+- Stops treating configured Kalshi family prefixes as exact `series_ticker` values.
+- Verifies exact Kalshi series through `GET /series/{series_ticker}` and discovers concrete prefixed series before targeted market pulls.
+- Isolates optional priority-series failures so one niche contract family cannot abort the entire Kalshi refresh.
+- Adds clearer DNS-resolution diagnostics for Polymarket and other source transport failures.
+- Clarifies in the dashboard that stored results remain available while a source refresh is incomplete.
+
+## 0.7.0 — Incentive Maps and post-close public visibility
+
+- Added a deterministic **Incentive Map** to every profile match, including YES/NO beneficiary sides, displayed-price payout math, plausible information holders, influence pathways, settlement sources, cost bearers, and evidence limits.
+- Added an explicit information-advantage assessment and an evidence ladder that separates a financial incentive from identity, access, anomalous timing, and independently corroborated misconduct.
+- Added operational-waterfall guidance showing how a financially incentivized metric can become a false internal signal and redirect Product, Engineering, Growth, Fraud, Security, Finance, or leadership decisions.
+- Added market snapshots for probability, volume, 24-hour volume, liquidity, open interest, and status changes.
+- Added on-demand source-aware public-exposure snapshots. Polymarket can return public wallet positions, average price, size, realized/total P&L, top holders, open interest, and trades; Kalshi remains aggregate-only for public participant analysis.
+- Added post-close public visibility to Archive so historical contracts can be examined without reopening them as active alerts.
+- Added a screenshot- and print-friendly Field Note view for each contract/profile relationship.
+- Made the Mac launcher more explicit and removed slow pre-dashboard summary queries from the startup path.
+- Added Incentive Maps to webhook payloads, plain-text alerts, database persistence, API results, and standard exports.
+- Added SQLite migrations for market movement and public-exposure history while preserving existing contracts, reviews, baselines, and custom profiles.
+- Added automated coverage for payout math, source-specific traceability, public position/P&L parsing, Kalshi trade failover, movement snapshots, archive evidence review, and Field Note rendering.
+
 ## 0.6.0 — Reviewer feedback and calibration
 
 - Added structured profile-match decisions: **Actionable**, **Monitor**, **Informational**, and **False positive**.

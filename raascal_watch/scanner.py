@@ -12,6 +12,7 @@ from .alerts import AlertDispatcher
 from .collectors import MarketCollector, enabled_collectors
 from .db import Database
 from .models import (
+    CollectorContext,
     MarketRecord,
     ScanSourceSummary,
     ScanSummary,
@@ -79,8 +80,25 @@ class Scanner:
         }
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             dispatcher = AlertDispatcher(self.settings, client)
+            collector_contexts = {
+                collector.name: CollectorContext(
+                    source_initialized=self.database.source_initialized(collector.name),
+                    last_success_at=self.database.source_last_success(collector.name),
+                    active_external_ids=tuple(
+                        self.database.list_active_external_ids(collector.name)
+                    ),
+                )
+                for collector in self.collectors
+            }
             fetch_results = await asyncio.gather(
-                *(collector.fetch(client, self.settings) for collector in self.collectors)
+                *(
+                    collector.fetch(
+                        client,
+                        self.settings,
+                        collector_contexts.get(collector.name),
+                    )
+                    for collector in self.collectors
+                )
             )
             summaries: list[ScanSourceSummary] = []
             for result in fetch_results:

@@ -120,6 +120,16 @@ class MatchResult:
     review_questions: list[str]
     stakeholders: list[str]
     actions: list[str]
+    incentive_map: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class CollectorContext:
+    """Local source state supplied to a collector for efficient refreshes."""
+
+    source_initialized: bool = False
+    last_success_at: datetime | None = None
+    active_external_ids: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)

@@ -20,34 +20,34 @@ then
 fi
 
 if [ ! -d .venv ]; then
+  echo "[1/5] Creating the local Python environment..."
   python3 -m venv .venv
+else
+  echo "[1/5] Using the existing local Python environment."
 fi
 
 source .venv/bin/activate
+
+echo "[2/5] Installing the current RaaScal Watch version..."
 python -m pip install -e .
 
 if [ ! -f .env ]; then
+  echo "[3/5] Creating the local configuration from .env.example..."
   cp .env.example .env
+else
+  echo "[3/5] Preserving the existing local configuration."
 fi
 
-# Merge newly shipped organizations, themes, and dependency mappings into an
-# older local watchlist without deleting custom profiles or terms. Stored markets are rematched only when
-# the watchlist fingerprint changes.
+echo "[4/5] Synchronizing monitoring profiles and validating the configuration..."
 raascal-watch sync-profiles --defaults "$PWD/config/watchlist.defaults.yaml"
 raascal-watch validate-config
-# Version 0.3 is live-only by default. Remove any synthetic records left by
-# earlier builds while preserving all Kalshi and Polymarket history.
 raascal-watch purge-demo
-# Version 0.4 calculates lifecycle dynamically: expired contracts leave the
-# current queue immediately but remain available in the historical archive.
-raascal-watch lifecycle-summary
-# Version 0.6 keeps reviewer decisions separate from raw match volume and shows
-# how much calibration work remains without changing the stored results.
-raascal-watch calibration-summary
 
+echo "[5/5] Starting the local dashboard..."
 echo
 echo "RaaScal Watch is opening at http://127.0.0.1:8000"
 echo "The default dashboard shows active contracts only; historical records are under Archive."
+echo "Dashboard totals and reviewer calibration load after the browser opens."
 echo "Keep this window open. Press Control-C here to stop the service."
 echo
 

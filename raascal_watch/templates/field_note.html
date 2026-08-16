@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RaaScal Watch Field Note · {{ review.organization }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body class="field-note-body">
+  {% set map = review.incentive_map %}
+  <main class="field-note-shell">
+    <header class="field-note-header">
+      <div class="field-note-brand">
+        <span class="brand-mark">RW</span>
+        <div><strong>RaaScal Watch</strong><span>FIELD NOTE · {{ review.organization }}</span></div>
+      </div>
+      <div class="field-note-actions no-print">
+        {% if organizations | length > 1 %}
+          <label>Profile
+            <select onchange="window.location.href='/field-note/{{ contract.market_id }}?organization='+encodeURIComponent(this.value)">
+              {% for organization in organizations %}<option value="{{ organization }}" {{ 'selected' if organization == review.organization else '' }}>{{ organization }}</option>{% endfor %}
+            </select>
+          </label>
+        {% endif %}
+        <button type="button" onclick="window.print()">Print / save PDF</button>
+        <a href="/#contract-{{ contract.market_id }}">Back to dashboard</a>
+      </div>
+    </header>
+
+    <section class="field-note-hero">
+      <div class="field-note-kicker">
+        <span class="source-badge">{{ contract.source }}</span>
+        <span class="severity-badge">{{ review.severity }}</span>
+        <span>{{ 'ACTIVE' if contract.active else 'ARCHIVED' }}</span>
+      </div>
+      <p class="field-note-number">RAASCAL WATCH · FIELD NOTE</p>
+      <h1>{{ map.headline if map else contract.title }}</h1>
+      <p class="field-note-contract">{{ contract.title }}</p>
+      <div class="field-note-metrics">
+        <div><span>Probability</span><strong>{{ contract.probability | probability }}</strong></div>
+        <div><span>Cumulative volume</span><strong>{{ contract.volume | money }}</strong></div>
+        <div><span>Closes</span><strong>{{ contract.closes_at | date }}</strong></div>
+        <div><span>Profile priority</span><strong>{{ review.risk_score }}/100</strong></div>
+      </div>
+      {% if contract.movement and contract.movement.snapshot_count > 1 %}
+        <div class="field-note-movement">
+          <span>{{ contract.movement.snapshot_count }} stored observations</span>
+          {% if contract.movement.deltas.probability is not none %}<strong>{{ (contract.movement.deltas.probability * 100) | round(1) }}-point latest probability move</strong>{% endif %}
+          {% if contract.movement.deltas.volume is not none %}<strong>{{ contract.movement.deltas.volume | money }} latest volume change</strong>{% endif %}
+        </div>
+      {% endif %}
+    </section>
+
+    {% if map %}
+      <section class="field-note-section">
+        <div class="field-note-section-heading">
+          <span>01</span><div><p>ECONOMIC INCENTIVE</p><h2>Who benefits? What is the potential upside?</h2></div>
+        </div>
+        <div class="field-note-benefit-grid">
+          {% for side in map.benefit_sides %}
+            <article class="field-note-benefit benefit-{{ side.side | lower }}">
+              <span>{{ side.holder_label }}</span>
+              <strong>{{ side.price | cents }} → $1 if {{ side.side }}</strong>
+              {% if side.gross_upside_per_share is not none %}<em>{{ side.gross_upside_per_share | cents }} illustrative gross upside per share</em>{% endif %}
+              {% if side.gross_profit_per_dollar is not none %}<small>$1 deployed at the displayed price implies about ${{ side.gross_profit_per_dollar | round(2) }} gross profit if held to a winning settlement.</small>{% endif %}
+              <p>{{ side.condition }}</p>
+            </article>
+          {% endfor %}
+        </div>
+        <p class="field-note-small">Cumulative volume is context—not a bounty, one participant’s position, or evidence of intent.</p>
+      </section>
+
+      <section class="field-note-section">
+        <div class="field-note-section-heading">
+          <span>02</span><div><p>ACCESS + INFLUENCE</p><h2>Who can know, influence, define, or absorb it?</h2></div>
+        </div>
+        <div class="field-note-quadrants">
+          <article><h3>Who may know first?</h3><ul>{% for item in map.information_holders %}<li>{{ item }}</li>{% endfor %}</ul></article>
+          <article><h3>Who could influence it?</h3><ul>{% for item in map.influence_actors %}<li>{{ item }}</li>{% endfor %}</ul></article>
+          <article><h3>Whose data or decision settles it?</h3><ul>{% for item in map.resolution_sources %}<li>{{ item }}</li>{% endfor %}</ul></article>
+          <article><h3>Who bears the downstream cost?</h3><ul>{% for item in map.cost_bearers %}<li>{{ item }}</li>{% endfor %}</ul></article>
+        </div>
+        {% if map.information_advantage %}
+          <div class="field-note-advantage advantage-{{ map.information_advantage.level }}">
+            <span>POSSIBLE INFORMATION ADVANTAGE</span>
+            <strong>{{ map.information_advantage.label }}</strong>
+            <p>{{ map.information_advantage.detail }}</p>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="field-note-section">
+        <div class="field-note-section-heading">
+          <span>03</span><div><p>OPERATIONAL WATERFALL</p><h2>How could the market create a false business signal?</h2></div>
+        </div>
+        <div class="field-note-cascade">
+          {% for stage in map.downstream_cascade %}
+            <article><span>{{ loop.index }}</span><strong>{{ stage.stage }}</strong><p>{{ stage.detail }}</p></article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="field-note-section field-note-evidence">
+        <div class="field-note-section-heading">
+          <span>04</span><div><p>VISIBILITY, NOT VERDICT</p><h2>What could the public actually see after the market closes?</h2></div>
+        </div>
+        <div class="field-note-evidence-grid">
+          <article>
+            <h3>{{ map.public_traceability.label }}</h3>
+            <p>{{ map.public_traceability.after_close }}</p>
+            <h4>Publicly reviewable</h4>
+            <ul>{% for item in map.public_traceability.public_checks %}<li>{{ item }}</li>{% endfor %}</ul>
+          </article>
+          <article>
+            <h3>What public data cannot prove</h3>
+            <ul>{% for item in map.public_traceability.restricted_checks %}<li>{{ item }}</li>{% endfor %}</ul>
+            <h4>Company-side checks</h4>
+            <ol>{% for item in map.post_close_checks %}<li>{{ item }}</li>{% endfor %}</ol>
+          </article>
+        </div>
+
+        <section class="field-note-public-exposure public-exposure-panel" data-public-exposure-panel data-market-id="{{ contract.market_id }}" data-source="{{ contract.source }}">
+          <div class="public-exposure-heading">
+            <div>
+              <p class="eyebrow">Source-aware public snapshot</p>
+              <h4>{{ 'Wallet positions, holders, and trade timing may be publicly visible' if contract.source == 'polymarket' else 'Public trade data is aggregate; customer identity is not public' }}</h4>
+            </div>
+            <button class="load-exposure-button no-print" type="button" data-load-public-exposure data-market-id="{{ contract.market_id }}">
+              {{ 'Refresh public visibility' if contract.public_exposure else 'Capture public visibility' }}
+            </button>
+          </div>
+          <div class="public-exposure-content" data-public-exposure-content>
+            {% if contract.public_exposure %}
+              <p><strong>{{ contract.public_exposure.visibility_label }}:</strong> {{ contract.public_exposure.detail }}</p>
+              {% if contract.public_exposure.open_interest is not none %}<p><strong>Reported open interest:</strong> {{ contract.public_exposure.open_interest | number }}</p>{% endif %}
+              {% if contract.public_exposure.position_groups %}
+                <div class="exposure-section-heading"><strong>Public market positions</strong><span>Wallet labels may be pseudonymous</span></div>
+                <div class="exposure-outcomes">
+                  {% for group in contract.public_exposure.position_groups %}
+                    <div class="exposure-outcome-card">
+                      <h6>{{ group.outcome }}</h6>
+                      {% if group.positions %}
+                        <div class="position-table-wrap"><table class="position-table">
+                          <thead><tr><th>Wallet / profile</th><th>Shares</th><th>Avg. entry</th><th>Current value</th><th>Total P&amp;L</th></tr></thead>
+                          <tbody>{% for position in group.positions %}<tr>
+                            <td><code title="{{ position.wallet }}">{{ position.display_name }}</code>{% if position.verified_profile %}<span class="verified-mark">verified</span>{% endif %}</td>
+                            <td>{{ position.size | number }}</td><td>{{ position.average_price | cents }}</td><td>{{ position.current_value | money }}</td>
+                            <td class="{{ 'positive-value' if position.total_pnl and position.total_pnl > 0 else ('negative-value' if position.total_pnl and position.total_pnl < 0 else '') }}">{{ position.total_pnl | money }}</td>
+                          </tr>{% endfor %}</tbody>
+                        </table></div>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              {% elif contract.public_exposure.holder_groups %}
+                <div class="holder-groups">{% for group in contract.public_exposure.holder_groups %}<div class="holder-group"><strong>{{ group.outcome }}</strong>{% for holder in group.holders %}<span><code title="{{ holder.wallet }}">{{ holder.display_name }}</code> · {{ holder.amount | number }} shares</span>{% endfor %}</div>{% endfor %}</div>
+              {% endif %}
+              {% if contract.public_exposure.recent_trades %}
+                <div class="exposure-section-heading"><strong>Recent publicly returned trades</strong><span>{{ 'Wallet-level' if contract.public_exposure.visibility == 'wallet_level' else 'Aggregate only' }}</span></div>
+                <div class="recent-trades-wrap"><table class="recent-trades-table">
+                  <thead><tr><th>Time</th><th>Participant visibility</th><th>Outcome / side</th><th>Size</th><th>Price</th></tr></thead>
+                  <tbody>{% for trade in contract.public_exposure.recent_trades %}<tr><td>{{ trade.timestamp | date }}</td><td><code title="{{ trade.wallet or '' }}">{{ trade.display_name or 'Participant not public' }}</code></td><td>{{ trade.outcome or '' }}{% if trade.side %} · {{ trade.side }}{% endif %}</td><td>{{ trade.size | number }}</td><td>{{ trade.price | cents }}</td></tr>{% endfor %}</tbody>
+                </table></div>
+              {% endif %}
+              {% if contract.public_exposure.positions_error %}<p class="small-muted"><strong>Position detail unavailable:</strong> {{ contract.public_exposure.positions_error }}</p>{% endif %}
+              {% if contract.public_exposure.holders_error %}<p class="small-muted"><strong>Holder detail unavailable:</strong> {{ contract.public_exposure.holders_error }}</p>{% endif %}
+              {% if contract.public_exposure.trades_error %}<p class="small-muted"><strong>Trade detail unavailable:</strong> {{ contract.public_exposure.trades_error }}</p>{% endif %}
+              <small>Snapshot captured {{ contract.public_exposure.captured_at | date }}. {{ contract.public_exposure.caveat }}</small>
+            {% else %}
+              <p>Capture a snapshot to preserve the public market visibility available from this source. A profitable public position can be a review clue, but it is not proof of identity, inside information, influence, or misconduct.</p>
+            {% endif %}
+          </div>
+        </section>
+
+        {% if map.evidence_ladder %}
+          <div class="field-note-ladder">
+            <h3>Evidence ladder</h3>
+            <p>Move from public signal to stronger concern carefully. Each step requires more corroboration.</p>
+            <div class="evidence-ladder">
+              {% for level in map.evidence_ladder %}<div><strong>{{ level.level }}</strong><p>{{ level.detail }}</p></div>{% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      </section>
+
+      <p class="field-note-warning">{{ map.caveat }}</p>
+    {% else %}
+      <section class="field-note-section"><p>This stored match predates the Incentive Map. Run <code>raascal-watch refresh-guidance</code> to regenerate its analysis.</p></section>
+    {% endif %}
+
+    <footer class="field-note-footer">
+      <span>Generated {{ generated_at | date }} · RaaScal Watch v{{ version }}</span>
+      <strong>PUBLIC MARKET SIGNAL ≠ EVIDENCE OF MISCONDUCT</strong>
+    </footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', path='/app.js') }}"></script>
+</body>
+</html>

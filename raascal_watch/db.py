@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS matches (
     review_questions_json TEXT NOT NULL DEFAULT '[]',
     stakeholders_json TEXT NOT NULL DEFAULT '[]',
     actions_json TEXT NOT NULL DEFAULT '[]',
+    incentive_map_json TEXT NOT NULL DEFAULT '{}',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     alert_state TEXT NOT NULL DEFAULT 'new',
@@ -116,6 +117,39 @@ CREATE TABLE IF NOT EXISTS review_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_review_feedback_decision
     ON review_feedback(decision, updated_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+    captured_at TEXT NOT NULL,
+    probability REAL,
+    volume REAL,
+    volume_24h REAL,
+    liquidity REAL,
+    open_interest REAL,
+    status TEXT NOT NULL DEFAULT 'unknown'
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_snapshots_market_time
+    ON market_snapshots(market_id, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS public_exposure_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+    captured_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    condition_id TEXT,
+    open_interest REAL,
+    holder_groups_json TEXT NOT NULL DEFAULT '[]',
+    detail TEXT NOT NULL DEFAULT '',
+    caveat TEXT NOT NULL DEFAULT '',
+    raw_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_exposure_market_time
+    ON public_exposure_snapshots(market_id, captured_at DESC);
 
 CREATE TABLE IF NOT EXISTS source_state (
     source TEXT PRIMARY KEY,
@@ -211,6 +245,12 @@ class Database:
                 "match_basis",
                 "TEXT NOT NULL DEFAULT 'direct'",
             )
+            self._ensure_column(
+                connection,
+                "matches",
+                "incentive_map_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
 
     @staticmethod
     def _ensure_column(
@@ -243,6 +283,42 @@ class Database:
                 "SELECT initialized_at FROM source_state WHERE source = ?", (source,)
             ).fetchone()
             return bool(row and row["initialized_at"])
+
+    def source_last_success(self, source: str) -> datetime | None:
+        """Return the most recent successful refresh timestamp for one source."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT last_success_at FROM source_state WHERE source = ?",
+                (source,),
+            ).fetchone()
+        return parse_datetime(row["last_success_at"]) if row and row["last_success_at"] else None
+
+    def list_active_external_ids(
+        self, source: str, *, matched_only: bool = True, limit: int = 5000
+    ) -> list[str]:
+        """Return active source identifiers worth refreshing between discovery scans.
+
+        By default this is limited to contracts that already matched at least one
+        organization or monitored theme. Refreshing those records keeps probability,
+        volume, open interest, status, and closing time current without repeatedly
+        traversing the source's entire public catalog.
+        """
+        scope_sql, scope_params = _market_scope_clause("active")
+        join = "JOIN matches mt ON mt.market_id = m.id" if matched_only else ""
+        distinct = "DISTINCT" if matched_only else ""
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {distinct} m.external_id AS external_id
+                FROM markets m
+                {join}
+                WHERE m.source = ? AND {scope_sql}
+                ORDER BY m.last_seen_at DESC
+                LIMIT ?
+                """,
+                (source, *scope_params, max(1, min(limit, 50000))),
+            ).fetchall()
+        return [str(row["external_id"]) for row in rows if row["external_id"]]
 
     def mark_source_success(self, source: str, at: datetime, initialize: bool = True) -> None:
         timestamp = isoformat(at)
@@ -360,7 +436,12 @@ class Database:
         )
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT id FROM markets WHERE source = ? AND external_id = ?",
+                """
+                SELECT id, probability, volume, volume_24h, liquidity,
+                       open_interest, status
+                FROM markets
+                WHERE source = ? AND external_id = ?
+                """,
                 (market.source, market.external_id),
             ).fetchone()
             if row:
@@ -376,6 +457,40 @@ class Database:
                     """,
                     values,
                 )
+                prior_snapshot = connection.execute(
+                    "SELECT 1 FROM market_snapshots WHERE market_id = ? LIMIT 1",
+                    (market_id,),
+                ).fetchone()
+                tracked_changed = any(
+                    row[field] != value
+                    for field, value in (
+                        ("probability", market.probability),
+                        ("volume", market.volume),
+                        ("volume_24h", market.volume_24h),
+                        ("liquidity", market.liquidity),
+                        ("open_interest", market.open_interest),
+                        ("status", market.status),
+                    )
+                )
+                if tracked_changed or prior_snapshot is None:
+                    connection.execute(
+                        """
+                        INSERT INTO market_snapshots(
+                            market_id, captured_at, probability, volume, volume_24h,
+                            liquidity, open_interest, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            market_id,
+                            seen,
+                            market.probability,
+                            market.volume,
+                            market.volume_24h,
+                            market.liquidity,
+                            market.open_interest,
+                            market.status,
+                        ),
+                    )
                 return market_id, False
 
             cursor = connection.execute(
@@ -405,7 +520,26 @@ class Database:
                     _json(market.raw),
                 ),
             )
-            return int(cursor.lastrowid), True
+            market_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                INSERT INTO market_snapshots(
+                    market_id, captured_at, probability, volume, volume_24h,
+                    liquidity, open_interest, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    market_id,
+                    seen,
+                    market.probability,
+                    market.volume,
+                    market.volume_24h,
+                    market.liquidity,
+                    market.open_interest,
+                    market.status,
+                ),
+            )
+            return market_id, True
 
     def upsert_match(
         self,
@@ -427,6 +561,7 @@ class Database:
             _json(result.review_questions),
             _json(result.stakeholders),
             _json(result.actions),
+            _json(result.incentive_map),
             seen,
             market_id,
             result.organization,
@@ -446,7 +581,7 @@ class Database:
                         categories_json = ?,
                         risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
                         review_questions_json = ?, stakeholders_json = ?,
-                        actions_json = ?, last_seen_at = ?
+                        actions_json = ?, incentive_map_json = ?, last_seen_at = ?
                     WHERE market_id = ? AND organization = ?
                     """,
                     values,
@@ -459,8 +594,8 @@ class Database:
                     market_id, organization, matched_identity_terms_json,
                     matched_metric_terms_json, categories_json, risk_score,
                     severity, match_basis, roles_json, reasons_json, review_questions_json,
-                    stakeholders_json, actions_json, first_seen_at, last_seen_at, alert_state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stakeholders_json, actions_json, incentive_map_json, first_seen_at, last_seen_at, alert_state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     market_id,
@@ -476,6 +611,7 @@ class Database:
                     _json(result.review_questions),
                     _json(result.stakeholders),
                     _json(result.actions),
+                    _json(result.incentive_map),
                     seen,
                     seen,
                     initial_alert_state,
@@ -750,7 +886,8 @@ class Database:
                     matched_metric_terms_json = ?,
                     categories_json = ?,
                     risk_score = ?, severity = ?, match_basis = ?, roles_json = ?, reasons_json = ?,
-                    review_questions_json = ?, stakeholders_json = ?, actions_json = ?
+                    review_questions_json = ?, stakeholders_json = ?, actions_json = ?,
+                    incentive_map_json = ?
                 WHERE market_id = ? AND organization = ?
                 """,
                 (
@@ -765,6 +902,7 @@ class Database:
                     _json(result.review_questions),
                     _json(result.stakeholders),
                     _json(result.actions),
+                    _json(result.incentive_map),
                     market_id,
                     result.organization,
                 ),
@@ -955,6 +1093,177 @@ class Database:
         rows = self._query_matches("WHERE mt.id = ?", (match_id,), limit=1)
         return rows[0] if rows else None
 
+    def get_market_record(self, market_id: int) -> MarketRecord | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT source, external_id, title, description, url, status,
+                       source_created_at, closes_at, probability, volume,
+                       volume_24h, liquidity, open_interest, raw_json
+                FROM markets WHERE id = ?
+                """,
+                (market_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return MarketRecord(
+            source=row["source"],
+            external_id=row["external_id"],
+            title=row["title"],
+            description=row["description"],
+            url=row["url"],
+            status=row["status"],
+            created_at=parse_datetime(row["source_created_at"]),
+            closes_at=parse_datetime(row["closes_at"]),
+            probability=row["probability"],
+            volume=row["volume"],
+            volume_24h=row["volume_24h"],
+            liquidity=row["liquidity"],
+            open_interest=row["open_interest"],
+            raw=_loads(row["raw_json"], {}),
+        )
+
+    def save_public_exposure_snapshot(
+        self, market_id: int, exposure: dict[str, Any]
+    ) -> dict[str, Any]:
+        captured_at = str(exposure.get("captured_at") or isoformat(utcnow()))
+        holder_groups = exposure.get("holder_groups") or []
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO public_exposure_snapshots(
+                    market_id, captured_at, source, visibility, condition_id,
+                    open_interest, holder_groups_json, detail, caveat, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    market_id,
+                    captured_at,
+                    str(exposure.get("source") or "unknown"),
+                    str(exposure.get("visibility") or "unknown"),
+                    exposure.get("condition_id"),
+                    exposure.get("open_interest"),
+                    _json(holder_groups),
+                    str(exposure.get("detail") or ""),
+                    str(exposure.get("caveat") or ""),
+                    _json(exposure),
+                ),
+            )
+            snapshot_id = int(cursor.lastrowid)
+        output = dict(exposure)
+        output["snapshot_id"] = snapshot_id
+        output["captured_at"] = captured_at
+        return output
+
+    def latest_public_exposure(self, market_id: int) -> dict[str, Any] | None:
+        values = self._latest_public_exposures([market_id])
+        return values.get(market_id)
+
+    def _latest_public_exposures(
+        self, market_ids: list[int]
+    ) -> dict[int, dict[str, Any]]:
+        if not market_ids:
+            return {}
+        placeholders = ",".join("?" for _ in market_ids)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT p.*
+                FROM public_exposure_snapshots p
+                JOIN (
+                    SELECT market_id, MAX(id) AS latest_id
+                    FROM public_exposure_snapshots
+                    WHERE market_id IN ({placeholders})
+                    GROUP BY market_id
+                ) latest ON latest.latest_id = p.id
+                """,
+                tuple(market_ids),
+            ).fetchall()
+        output: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            market_id = int(row["market_id"])
+            raw = _loads(row["raw_json"], {})
+            if not isinstance(raw, dict):
+                raw = {}
+            raw.update(
+                {
+                    "snapshot_id": int(row["id"]),
+                    "market_id": market_id,
+                    "captured_at": row["captured_at"],
+                    "source": row["source"],
+                    "visibility": row["visibility"],
+                    "condition_id": row["condition_id"],
+                    "open_interest": row["open_interest"],
+                    "holder_groups": _loads(row["holder_groups_json"], []),
+                    "detail": row["detail"],
+                    "caveat": row["caveat"],
+                }
+            )
+            output[market_id] = raw
+        return output
+
+    def _market_movements(self, market_ids: list[int]) -> dict[int, dict[str, Any]]:
+        if not market_ids:
+            return {}
+        placeholders = ",".join("?" for _ in market_ids)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT market_id, captured_at, probability, volume, volume_24h,
+                       liquidity, open_interest, status
+                FROM market_snapshots
+                WHERE market_id IN ({placeholders})
+                ORDER BY market_id, captured_at, id
+                """,
+                tuple(market_ids),
+            ).fetchall()
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(int(row["market_id"]), []).append(dict(row))
+
+        output: dict[int, dict[str, Any]] = {}
+        tracked = ("probability", "volume", "volume_24h", "liquidity", "open_interest")
+        for market_id, snapshots in grouped.items():
+            latest = snapshots[-1]
+            previous = snapshots[-2] if len(snapshots) > 1 else None
+            first = snapshots[0]
+            deltas: dict[str, float | None] = {}
+            since_first: dict[str, float | None] = {}
+            for field in tracked:
+                current = latest.get(field)
+                prior = previous.get(field) if previous else None
+                origin = first.get(field)
+                deltas[field] = (
+                    float(current) - float(prior)
+                    if current is not None and prior is not None
+                    else None
+                )
+                since_first[field] = (
+                    float(current) - float(origin)
+                    if current is not None and origin is not None
+                    else None
+                )
+            output[market_id] = {
+                "snapshot_count": len(snapshots),
+                "captured_at": latest["captured_at"],
+                "previous_captured_at": previous["captured_at"] if previous else None,
+                "deltas": deltas,
+                "since_first": since_first,
+                "changed": bool(previous and any(value not in (None, 0.0) for value in deltas.values())),
+            }
+        return output
+
+    def get_contract_detail(self, market_id: int) -> dict[str, Any] | None:
+        """Return one fully assembled contract for active or archived views."""
+        view = "active" if self.market_is_active(market_id) else "archive"
+        result = self.list_contract_groups(
+            view=view,
+            market_id=market_id,
+            limit=1,
+        )
+        contracts = result.get("contracts") or []
+        return contracts[0] if contracts else None
+
     def market_is_active(self, market_id: int) -> bool:
         scope_sql, scope_params = _market_scope_clause("active")
         with self.connect() as connection:
@@ -1039,6 +1348,7 @@ class Database:
         view: str = "active",
         sort: str = "priority",
         limit: int = 200,
+        market_id: int | None = None,
     ) -> dict[str, Any]:
         """Return one card per exact contract, grouped under source event/series.
 
@@ -1061,6 +1371,9 @@ class Database:
         if source:
             clauses.append("m.source = ?")
             params.append(source)
+        if market_id is not None:
+            clauses.append("m.id = ?")
+            params.append(int(market_id))
         where = f"WHERE {' AND '.join(clauses)}"
 
         rows = self._query_matches(where, tuple(params), limit=100000)
@@ -1115,6 +1428,7 @@ class Database:
                     "review_questions": row["review_questions"],
                     "stakeholders": row["stakeholders"],
                     "actions": row["actions"],
+                    "incentive_map": row.get("incentive_map", {}),
                     "match_first_seen_at": row["match_first_seen_at"],
                     "match_last_seen_at": row["match_last_seen_at"],
                     "alert_state": row["alert_state"],
@@ -1224,6 +1538,24 @@ class Database:
             contract["top_review"] = top_review
             contracts.append(contract)
 
+        market_ids = [int(contract["market_id"]) for contract in contracts]
+        movement_by_market = self._market_movements(market_ids)
+        exposure_by_market = self._latest_public_exposures(market_ids)
+        for contract in contracts:
+            market_id = int(contract["market_id"])
+            contract["movement"] = movement_by_market.get(
+                market_id,
+                {
+                    "snapshot_count": 0,
+                    "captured_at": None,
+                    "previous_captured_at": None,
+                    "deltas": {},
+                    "since_first": {},
+                    "changed": False,
+                },
+            )
+            contract["public_exposure"] = exposure_by_market.get(market_id)
+
         def sort_key(contract: dict[str, Any]) -> tuple[Any, ...]:
             if normalized_sort == "review":
                 review_bucket = (
@@ -1299,6 +1631,86 @@ class Database:
             "sort": normalized_sort,
         }
 
+    def get_contract_bundle(self, market_id: int) -> dict[str, Any] | None:
+        rows = self._query_matches("WHERE m.id = ?", (market_id,), limit=1000)
+        if not rows:
+            return None
+        first = rows[0]
+        raw = first.get("raw") or {}
+        display_title = clean_display_title(first["source"], first["title"], raw)
+        event_key, event_title = event_group_identity(
+            first["source"], first["external_id"], display_title, raw
+        )
+        reviews: list[dict[str, Any]] = []
+        for row in rows:
+            reviews.append(
+                {
+                    "match_id": row["match_id"],
+                    "organization": row["organization"],
+                    "matched_identity_terms": row["matched_identity_terms"],
+                    "matched_metric_terms": row["matched_metric_terms"],
+                    "categories": row["categories"],
+                    "risk_score": row["risk_score"],
+                    "severity": row["severity"],
+                    "match_basis": row.get("match_basis") or "direct",
+                    "roles": row["roles"],
+                    "reasons": row["reasons"],
+                    "review_questions": row["review_questions"],
+                    "stakeholders": row["stakeholders"],
+                    "actions": row["actions"],
+                    "incentive_map": row.get("incentive_map") or {},
+                    "review_decision": row.get("review_decision"),
+                    "review_note": row.get("review_note") or "",
+                    "corrected_role": row.get("corrected_role") or "",
+                    "suggested_owner": row.get("suggested_owner") or "",
+                    "acknowledged_at": row.get("acknowledged_at"),
+                }
+            )
+        reviews.sort(
+            key=lambda item: (
+                _SEVERITY_RANK.get(str(item["severity"]), 0),
+                int(item["risk_score"]),
+                str(item["organization"]),
+            ),
+            reverse=True,
+        )
+        active = self.market_is_active(market_id)
+        movement = self._market_movements([market_id]).get(market_id)
+        exposure = self.latest_public_exposure(market_id)
+        return {
+            "market_id": market_id,
+            "source": first["source"],
+            "external_id": first["external_id"],
+            "title": display_title,
+            "stored_title": first["title"],
+            "description": first["description"],
+            "url": first["url"],
+            "status": first["status"],
+            "source_created_at": first["source_created_at"],
+            "closes_at": first["closes_at"],
+            "probability": first["probability"],
+            "volume": first["volume"],
+            "volume_24h": first["volume_24h"],
+            "liquidity": first["liquidity"],
+            "open_interest": first["open_interest"],
+            "first_seen_at": first["first_seen_at"],
+            "last_seen_at": first["last_seen_at"],
+            "event_key": event_key,
+            "event_title": event_title,
+            "reviews": reviews,
+            "organizations": [item["organization"] for item in reviews],
+            "risk_score": max(int(item["risk_score"]) for item in reviews),
+            "severity": max(
+                (str(item["severity"]) for item in reviews),
+                key=lambda value: _SEVERITY_RANK.get(value, 0),
+            ),
+            "active": active,
+            "archive_reason": None if active else archive_reason(first["status"], first["closes_at"]),
+            "movement": movement,
+            "public_exposure": exposure,
+            "raw": raw,
+        }
+
     def _query_matches(
         self, where: str, params: tuple[Any, ...], limit: int
     ) -> list[dict[str, Any]]:
@@ -1310,7 +1722,7 @@ class Database:
                     mt.matched_identity_terms_json, mt.matched_metric_terms_json,
                     mt.categories_json, mt.risk_score, mt.severity, mt.match_basis,
                     mt.roles_json, mt.reasons_json, mt.review_questions_json,
-                    mt.stakeholders_json, mt.actions_json,
+                    mt.stakeholders_json, mt.actions_json, mt.incentive_map_json,
                     mt.first_seen_at AS match_first_seen_at,
                     mt.last_seen_at AS match_last_seen_at,
                     mt.alert_state, mt.notified_at, mt.acknowledged_at,
@@ -1357,6 +1769,7 @@ class Database:
             ):
                 clean_name = field.removesuffix("_json")
                 item[clean_name] = _loads(item.pop(field), [])
+            item["incentive_map"] = _loads(item.pop("incentive_map_json", None), {})
             item["review_reason_codes"] = _loads(
                 item.pop("review_reason_codes_json", None), []
             )

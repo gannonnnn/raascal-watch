@@ -9,7 +9,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import uvicorn
 
 from .db import Database
 from .models import MarketRecord
@@ -207,6 +206,8 @@ def command_calibration_summary(_: argparse.Namespace) -> int:
 
 
 def command_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
     uvicorn.run(
         "raascal_watch.app:app",
         host=args.host,
@@ -284,6 +285,7 @@ def command_export(args: argparse.Namespace) -> int:
             "stakeholders",
             "reasons",
             "actions",
+            "incentive_map",
         ]
         with output.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)
@@ -293,7 +295,11 @@ def command_export(args: argparse.Namespace) -> int:
                     field: (
                         " | ".join(str(item) for item in row.get(field, []))
                         if isinstance(row.get(field), list)
-                        else row.get(field)
+                        else (
+                            json.dumps(row.get(field), ensure_ascii=False)
+                            if isinstance(row.get(field), dict)
+                            else row.get(field)
+                        )
                     )
                     for field in fields
                 }

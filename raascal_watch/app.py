@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+import httpx
 from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict
 from datetime import datetime
@@ -18,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .db import Database
+from .exposure import PublicExposureError, fetch_public_exposure
 from .review import (
     GUIDANCE_RATING_LABELS,
     GUIDANCE_RATING_VALUES,
@@ -62,20 +65,43 @@ def _format_date(value: str | None) -> str:
 def _format_money(value: float | None) -> str:
     if value is None:
         return "—"
-    if value >= 1_000_000:
-        return f"${value / 1_000_000:.2f}M"
-    if value >= 1_000:
-        return f"${value / 1_000:.1f}K"
-    return f"${value:,.0f}"
+    sign = "-" if value < 0 else ""
+    magnitude = abs(value)
+    if magnitude >= 1_000_000:
+        return f"{sign}${magnitude / 1_000_000:.2f}M"
+    if magnitude >= 1_000:
+        return f"{sign}${magnitude / 1_000:.1f}K"
+    return f"{sign}${magnitude:,.0f}"
 
 
 def _format_probability(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:.1f}%"
 
 
+def _format_cents(value: float | None) -> str:
+    return "—" if value is None else f"{value * 100:.1f}¢"
+
+
+def _format_number(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+def _format_delta(value: float | None, *, percentage_points: bool = False) -> str:
+    if value is None:
+        return "—"
+    if percentage_points:
+        return f"{value * 100:+.1f} pts"
+    return f"{value:+,.0f}"
+
+
 templates.env.filters["date"] = _format_date
 templates.env.filters["money"] = _format_money
 templates.env.filters["probability"] = _format_probability
+templates.env.filters["cents"] = _format_cents
+templates.env.filters["number"] = _format_number
+templates.env.filters["delta"] = _format_delta
 
 
 def _normalize_view(value: str | None) -> str:
@@ -348,6 +374,73 @@ async def api_contracts(
         view=_normalize_view(view),
         include_demo=include_demo,
         limit=limit,
+    )
+
+
+@app.get("/api/contracts/{market_id}/public-exposure")
+async def get_public_exposure_snapshot(market_id: int) -> dict[str, Any]:
+    if database.get_market_record(market_id) is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    exposure = database.latest_public_exposure(market_id)
+    if exposure is None:
+        raise HTTPException(status_code=404, detail="No public exposure snapshot has been captured")
+    return exposure
+
+
+@app.post("/api/contracts/{market_id}/public-exposure")
+async def public_exposure_snapshot(market_id: int) -> dict[str, Any]:
+    market = database.get_market_record(market_id)
+    if market is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            headers={"User-Agent": f"RaaScal-Watch/{__version__} public-market-research"},
+        ) as client:
+            exposure = await fetch_public_exposure(
+                market,
+                client=client,
+                polymarket_data_api_url=settings.polymarket_data_api_url,
+                kalshi_base_url=settings.kalshi_base_url,
+                kalshi_fallback_base_url=settings.kalshi_fallback_base_url,
+                holder_limit=settings.public_holder_limit,
+                trade_limit=settings.public_trade_limit,
+            )
+    except PublicExposureError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return database.save_public_exposure_snapshot(market_id, exposure)
+
+
+@app.get("/field-note/{market_id}", response_class=HTMLResponse)
+async def field_note(
+    request: Request,
+    market_id: int,
+    organization: str | None = Query(default=None),
+) -> HTMLResponse:
+    contract = database.get_contract_bundle(market_id)
+    if contract is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    reviews = contract.get("reviews") or []
+    selected = None
+    if organization:
+        selected = next(
+            (item for item in reviews if item.get("organization") == organization),
+            None,
+        )
+    if selected is None and reviews:
+        selected = reviews[0]
+    if selected is None:
+        raise HTTPException(status_code=404, detail="No profile review is available")
+    return templates.TemplateResponse(
+        request=request,
+        name="field_note.html",
+        context={
+            "contract": contract,
+            "review": selected,
+            "organizations": [item.get("organization") for item in reviews],
+            "generated_at": utcnow().isoformat(),
+            "version": __version__,
+        },
     )
 
 

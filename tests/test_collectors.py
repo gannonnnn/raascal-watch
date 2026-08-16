@@ -5,7 +5,12 @@ from dataclasses import replace
 
 import httpx
 
-from raascal_watch.collectors import KalshiCollector, PolymarketCollector
+from raascal_watch.collectors import (
+    CollectorTransportError,
+    KalshiCollector,
+    PolymarketCollector,
+    get_json,
+)
 from raascal_watch.settings import get_settings
 
 
@@ -100,6 +105,7 @@ def test_kalshi_falls_back_to_supported_host_after_403() -> None:
                 "https://api.elections.kalshi.com/trade-api/v2"
             ),
             kalshi_priority_series_scan=False,
+            kalshi_prefer_compatibility_host=False,
         )
         collector = KalshiCollector()
         transport = httpx.MockTransport(handler)
@@ -137,6 +143,7 @@ def test_kalshi_remembers_working_fallback_for_session() -> None:
                 "https://api.elections.kalshi.com/trade-api/v2"
             ),
             kalshi_priority_series_scan=False,
+            kalshi_prefer_compatibility_host=False,
         )
         collector = KalshiCollector()
         transport = httpx.MockTransport(handler)
@@ -157,6 +164,12 @@ def test_kalshi_priority_series_pull_surfaces_flight_cancellation_family() -> No
     def handler(request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         requests_seen.append(params)
+        if request.url.path.endswith("/series/KXUSFLYCAN"):
+            return httpx.Response(
+                200,
+                json={"series": {"ticker": "KXUSFLYCAN"}},
+                request=request,
+            )
         series = params.get("series_ticker")
         if series == "KXUSFLYCAN" and params.get("status") == "open":
             return httpx.Response(
@@ -269,6 +282,7 @@ def test_kalshi_discovers_prefixed_airport_cancellation_series() -> None:
 
     assert result.error is None
     assert "KXFLYCANCJFK" in requested_series
+    assert "KXFLYCANC" not in requested_series
     market = next(
         item
         for item in result.markets
@@ -277,3 +291,194 @@ def test_kalshi_discovers_prefixed_airport_cancellation_series() -> None:
     assert "FlightAware" not in market.description
     assert market.raw["_raascal_series"]["ticker"] == "KXFLYCANCJFK"
     assert market.raw["_raascal_series"]["settlement_sources"][0]["url"].endswith("flightaware.com/")
+
+
+def test_kalshi_priority_series_failure_does_not_abort_broad_scan() -> None:
+    requests_seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        series = params.get("series_ticker")
+        requests_seen.append((path, series))
+
+        if path.endswith("/series"):
+            return httpx.Response(
+                200,
+                json={
+                    "series": [
+                        {
+                            "ticker": "KXFLYCANCJFK",
+                            "title": "JFK flight cancellations",
+                            "category": "Transportation",
+                        }
+                    ]
+                },
+                request=request,
+            )
+        if "/series/" in path:
+            ticker = path.rsplit("/", 1)[-1]
+            if ticker == "KXUSFLYCAN":
+                return httpx.Response(
+                    200,
+                    json={"series": {"ticker": ticker}},
+                    request=request,
+                )
+            return httpx.Response(404, text="not found", request=request)
+        if series == "KXFLYCANCJFK":
+            return httpx.Response(403, text="Forbidden", request=request)
+        if series == "KXUSFLYCAN":
+            return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+        if not series and params.get("status") == "open":
+            return httpx.Response(
+                200,
+                json={
+                    "markets": [
+                        {
+                            "ticker": "KXBROAD-26",
+                            "event_ticker": "KXBROAD",
+                            "title": "Broad scan still succeeds",
+                            "status": "open",
+                        }
+                    ],
+                    "cursor": "",
+                },
+                request=request,
+            )
+        return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+
+    async def run():
+        settings = replace(
+            get_settings(),
+            max_pages_per_source=2,
+            kalshi_base_url="https://api.elections.kalshi.com/trade-api/v2",
+            kalshi_fallback_base_url=None,
+            kalshi_priority_series_scan=True,
+            kalshi_priority_series_page_limit=2,
+        )
+        collector = KalshiCollector()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collector.fetch(client, settings)
+
+    result = asyncio.run(run())
+
+    assert result.error is None
+    assert any(market.external_id == "KXBROAD-26" for market in result.markets)
+    assert any(series == "KXFLYCANCJFK" for _, series in requests_seen)
+
+
+def test_get_json_explains_dns_resolution_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "[Errno 8] nodename nor servname provided, or not known",
+            request=request,
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            try:
+                await get_json(
+                    client,
+                    "https://gamma-api.polymarket.com/events/keyset",
+                    attempts=1,
+                )
+            except CollectorTransportError as exc:
+                assert "DNS lookup failed for gamma-api.polymarket.com" in str(exc)
+                assert "next scheduled scan will retry" in str(exc)
+            else:
+                raise AssertionError("Expected a DNS-specific CollectorTransportError")
+
+    asyncio.run(run())
+
+
+def test_kalshi_incremental_refresh_uses_active_tickers_and_created_overlap() -> None:
+    from datetime import datetime, timezone
+
+    from raascal_watch.models import CollectorContext
+
+    requests_seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        requests_seen.append(params)
+        tickers = params.get("tickers")
+        if tickers:
+            markets = [
+                {
+                    "ticker": ticker,
+                    "event_ticker": ticker.split("-")[0],
+                    "title": f"Refresh {ticker}",
+                    "status": "open",
+                }
+                for ticker in tickers.split(",")
+            ]
+            return httpx.Response(
+                200, json={"markets": markets, "cursor": ""}, request=request
+            )
+        return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+
+    async def run():
+        settings = replace(
+            get_settings(),
+            kalshi_base_url="https://external-api.kalshi.com/trade-api/v2",
+            kalshi_fallback_base_url="https://api.elections.kalshi.com/trade-api/v2",
+            kalshi_prefer_compatibility_host=True,
+            kalshi_priority_series_scan=False,
+            kalshi_incremental_scan=True,
+            kalshi_incremental_page_size=250,
+            kalshi_incremental_page_limit=12,
+            kalshi_discovery_overlap_minutes=180,
+            kalshi_refresh_active_matches=True,
+            kalshi_refresh_batch_size=2,
+        )
+        context = CollectorContext(
+            source_initialized=True,
+            last_success_at=datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc),
+            active_external_ids=("KXA-1", "KXB-1", "KXC-1"),
+        )
+        collector = KalshiCollector()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collector.fetch(client, settings, context)
+
+    result = asyncio.run(run())
+    assert result.error is None
+    assert result.pages == 4  # two ticker batches plus open/unopened discovery
+    ticker_requests = [item for item in requests_seen if item.get("tickers")]
+    discovery_requests = [item for item in requests_seen if item.get("status")]
+    assert [item["tickers"] for item in ticker_requests] == ["KXA-1,KXB-1", "KXC-1"]
+    assert {item["status"] for item in discovery_requests} == {"open", "unopened"}
+    assert all(item["limit"] == "250" for item in discovery_requests)
+    assert all("min_created_ts" in item for item in discovery_requests)
+    assert {market.external_id for market in result.markets} == {
+        "KXA-1",
+        "KXB-1",
+        "KXC-1",
+    }
+
+
+def test_kalshi_initial_baseline_keeps_full_catalog_pagination() -> None:
+    requests_seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        requests_seen.append(params)
+        return httpx.Response(200, json={"markets": [], "cursor": ""}, request=request)
+
+    async def run():
+        settings = replace(
+            get_settings(),
+            max_pages_per_source=4,
+            kalshi_page_size=1000,
+            kalshi_priority_series_scan=False,
+            kalshi_prefer_compatibility_host=True,
+        )
+        collector = KalshiCollector()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await collector.fetch(client, settings)
+
+    result = asyncio.run(run())
+    assert result.error is None
+    discovery_requests = [item for item in requests_seen if item.get("status")]
+    assert {item["status"] for item in discovery_requests} == {"open", "unopened"}
+    assert all(item["limit"] == "1000" for item in discovery_requests)
+    assert all("min_created_ts" not in item for item in discovery_requests)

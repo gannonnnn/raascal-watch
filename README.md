@@ -23,6 +23,25 @@ The company named in the market is not always the only party exposed. An organiz
 
 RaaScal Watch is intended to surface that changed incentive environment before the signal is accepted at face value.
 
+## Version 0.7: Incentive Maps and post-close public visibility
+
+RaaScal Watch now explains the economic and operational pathway behind each surfaced contract, rather than relying on a single priority score. Each matched profile receives an **Incentive Map** showing:
+
+- who benefits from the YES and NO outcomes at the displayed market price;
+- who may know the answer before public disclosure;
+- who could influence the measured event, metric, decision, or data source;
+- whose data, status page, counter, report, or decision determines settlement;
+- who may absorb the downstream operational cost; and
+- how a financially incentivized signal could distort internal Product, Engineering, Growth, Fraud, Security, Finance, or leadership decisions.
+
+The dashboard stores market snapshots when probability, volume, liquidity, open interest, or status changes. It shows the latest movement and creates a screenshot-friendly **Field Note** for each profile relationship.
+
+A source-aware public-exposure check is available on demand. Polymarket snapshots may include public wallet-level positions, average price, size, P&L, top holders, and trades. Kalshi snapshots remain aggregate because public market data does not identify individual account positions. Archived contracts retain a **Post-close public visibility** panel so reviewers can preserve the observable benefit and timing after settlement.
+
+These data are review clues—not an insider-trading determination. A profitable wallet, concentrated position, or well-timed trade does not establish a real-world identity, privileged access, influence, intent, breach of duty, or misconduct.
+
+See `UPDATE_NOTES_V0_7.md` for the evidence model and limitations.
+
 ## Version 0.6: reviewer feedback and calibration
 
 RaaScal Watch now measures whether surfaced profile relationships are useful rather than treating every match as equally valuable. Each organization or theme attached to an active contract can receive one structured reviewer assessment:
@@ -39,6 +58,19 @@ The dashboard includes a calibration snapshot showing structured-review counts, 
 Reviewer assessments are calibration data, not ground truth. They do not prove abuse, trader intent, or misconduct.
 
 See `UPDATE_NOTES_V0_6.md` for the schema, decision definitions, and migration behavior.
+
+## Version 0.7.2: incremental Kalshi refreshes
+
+RaaScal Watch no longer re-reads the entire Kalshi catalog every 15 minutes after a successful baseline.
+
+- A true first baseline still uses broad open/unopened pagination.
+- Later scans refresh already matched active Kalshi contracts in bounded ticker batches.
+- New-contract discovery uses Kalshi's `min_created_ts` filter with a configurable overlap window.
+- The incremental discovery pass uses smaller pages and a separate safety cap.
+- The officially supported compatibility host is preferred by default on consumer networks, with the dedicated external host retained as automatic fallback.
+- Priority series such as flight-cancellation families are still queried directly before broad discovery.
+
+This reduces request volume substantially while keeping the active review queue and newly created contract discovery current. See `UPDATE_NOTES_V0_7_2.md` for settings and limitations.
 
 ## Version 0.5: topic and dependency-aware monitoring
 
@@ -97,10 +129,11 @@ The normal dashboard now shows **live public-market records only**.
 ## What the prototype does
 
 - Collects public market listings from Kalshi and Polymarket
-- Automatically retries Kalshi through its supported compatibility host when the preferred host returns HTTP 403/404 or cannot be reached
+- Uses Kalshi's supported compatibility host first on consumer networks and retains automatic failover to the dedicated external host
 - Matches contracts against configurable organization profiles and monitored themes
 - Maps configured source/product families to organizations whose data may determine settlement
 - Directly queries priority Kalshi series so niche monitored families are not lost behind the broad page cap
+- After baseline, refreshes active matched Kalshi contracts by ticker and discovers only newly created contracts with an overlap window
 - Detects references to companies, products, executives, public data sources, monitored metrics, and contract topics
 - Labels each relationship as direct, verified dependency, linked dependency, possible dependency, or theme
 - Assigns a transparent rule-based priority score
@@ -116,7 +149,12 @@ The normal dashboard now shows **live public-market records only**.
 - Automatically applies filters and supports priority, unreviewed-first, closing-time, volume, and recency sorting
 - Captures structured reviewer decisions, reasons, guidance ratings, role corrections, owner corrections, and notes at the profile-match level
 - Shows calibration metrics by organization/theme and risk pathway
-- Exports structured review feedback to CSV or JSON
+- Builds an Incentive Map for each profile relationship: beneficiaries, information holders, influence pathways, settlement sources, cost bearers, and evidence limits
+- Stores market snapshots when probability, volume, liquidity, open interest, or status changes
+- Provides on-demand source-aware public exposure snapshots, including wallet-level Polymarket positions/P&L when publicly available and aggregate-only Kalshi trade visibility
+- Keeps post-close public visibility available in Archive without reopening historical contracts as current review work
+- Generates a screenshot- and print-friendly Field Note for each contract/profile relationship
+- Exports structured review feedback and Incentive Maps to CSV or JSON
 - Includes automated tests and optional synthetic fixtures for development
 
 The prototype only reads public market-listing data. It does not place trades, access private accounts, or identify individual traders.
@@ -169,6 +207,8 @@ raascal-watch scan
 ```
 
 The first successful scan of each source creates a silent baseline. Matching contracts remain visible, but existing contracts are not pushed as “new” alerts. Contracts first observed during later scans can trigger notifications.
+
+For Kalshi, later scans are incremental: active matched contracts are refreshed in bounded ticker batches, while open and unopened discovery uses a timestamp overlap rather than replaying the full catalog. Resetting the Kalshi baseline intentionally returns the next scan to broad-baseline behavior.
 
 To deliberately alert on all currently matching contracts during the first scan:
 
@@ -316,7 +356,7 @@ Never commit a populated `.env` file. The repository includes only `.env.example
 
 ## How detection works
 
-1. A collector retrieves public market listings and directly queries configured priority Kalshi series.
+1. A collector retrieves public market listings, directly queries configured priority Kalshi series, and uses incremental Kalshi discovery after the baseline.
 2. Each contract is normalized into a common record and stored or updated in SQLite.
 3. The risk engine checks for a direct organization reference, a monitored theme, or a configured dependency relationship.
 4. Known source/product-family rules and settlement-source metadata can connect a contract to an organization without inventing a direct mention.

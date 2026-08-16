@@ -63,6 +63,24 @@ The Kalshi collector directly queries series referenced by dependency rules, so 
 
 The default page shows only active contracts. Closed or expired contracts are retained under the separate **Archive** tab and have no review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
 
+## Incentive Maps, Field Notes, and post-close review
+
+Open **Review guidance and record an assessment** on an active contract to see its Incentive Map:
+
+- **Who benefits?** YES and NO position holders, with illustrative gross upside per share from the displayed price.
+- **Who may know first?** Employees, vendors, partners, data operators, or other parties with plausible pre-public access.
+- **Who could influence it?** Actors capable of changing the metric, event, source data, decision, or public signal.
+- **Whose data settles it?** The named or inferred counter, status page, report, API, or decision source.
+- **Who bears the cost?** Internal teams, customers, partners, or leadership affected by a false or manipulated signal.
+
+Use **Open Field Note** to open a shareable, screenshot-friendly explanation of one contract/profile relationship.
+
+Use **Capture public visibility** to preserve the current public evidence surface. For Polymarket, this may include wallet-level size, average price, P&L, holders, and trades. For Kalshi, participant positions are not publicly attributable through the public market-data API, so the snapshot remains aggregate.
+
+After a contract closes, open **Archive → Post-close public visibility** and refresh the snapshot. This can show which public wallets benefited on Polymarket, but it cannot establish who controls a wallet, whether they had privileged access, or whether misconduct occurred.
+
+RaaScal Watch stores movement snapshots automatically when market values change. The dashboard may show the latest probability and cumulative-volume movement after repeated scans.
+
 ## Reviewer feedback and calibration
 
 Open **Review guidance and record an assessment** on an active contract. The same contract may have several matched profiles, and each profile is assessed separately. Choose:

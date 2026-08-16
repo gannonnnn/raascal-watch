@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Iterable
 
+from .incentive import build_incentive_map
 from .models import (
     DependencyRule,
     MarketRecord,
@@ -554,6 +555,13 @@ class RiskEngine:
             metric_label=metric_label,
             now=now,
         )
+        incentive_map = build_incentive_map(
+            market=market,
+            organization=organization,
+            roles=roles,
+            categories=categories,
+            metric_label=metric_label,
+        )
 
         score = max(0, min(100, score))
         matched_terms = (
@@ -574,4 +582,5 @@ class RiskEngine:
             review_questions=review_questions,
             stakeholders=unique_strings(stakeholders),
             actions=actions,
+            incentive_map=incentive_map,
         )

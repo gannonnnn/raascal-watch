@@ -65,6 +65,7 @@ def build_payload(market: MarketRecord, match: MatchResult) -> dict[str, Any]:
         "review_questions": match.review_questions,
         "recommended_stakeholders": match.stakeholders,
         "recommended_actions": match.actions,
+        "incentive_map": match.incentive_map,
         "market": {
             "source": market.source,
             "external_id": market.external_id,
@@ -89,6 +90,9 @@ def build_plain_text(market: MarketRecord, match: MatchResult) -> str:
     questions = "\n".join(f"- {item}" for item in match.review_questions)
     actions = "\n".join(f"- {item}" for item in match.actions[:8])
     stakeholders = ", ".join(match.stakeholders) or "Risk"
+    incentive = match.incentive_map or {}
+    headline = incentive.get("headline") or "A financial incentive is attached to this outcome."
+    public_visibility = (incentive.get("public_traceability") or {}).get("label") or "Unknown"
     return f"""RaaScal Watch alert: {match.organization}
 
 Severity: {match.severity.upper()} ({match.risk_score}/100)
@@ -99,6 +103,9 @@ Probability: {_percent(market.probability)}
 Volume: {_money(market.volume)}
 Closes: {_when(market.closes_at)}
 Link: {market.url or 'not available'}
+
+Incentive map: {headline}
+Public traceability: {public_visibility}
 
 Likely organization role(s): {roles}
 

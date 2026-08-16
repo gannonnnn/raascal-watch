@@ -124,3 +124,168 @@ document.querySelectorAll('[data-feedback-form]').forEach((form) => {
     }
   });
 });
+
+// v0.7 source-aware public exposure snapshots. These are deliberately
+// on-demand so the dashboard does not make one external request per contract.
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function formatNumber(value, maximumFractionDigits = 2) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits });
+}
+
+function formatMoney(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  const number = Number(value);
+  const sign = number < 0 ? '-' : '';
+  const absolute = Math.abs(number);
+  if (absolute >= 1_000_000) return `${sign}$${(absolute / 1_000_000).toFixed(2)}M`;
+  if (absolute >= 1_000) return `${sign}$${(absolute / 1_000).toFixed(1)}K`;
+  return `${sign}$${absolute.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatCents(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return `${(Number(value) * 100).toFixed(1)}¢`;
+}
+
+function formatTimestamp(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
+function publicExposurePositionHtml(exposure) {
+  const groups = Array.isArray(exposure.position_groups) ? exposure.position_groups : [];
+  if (!groups.length) return '';
+  return `
+    <div class="exposure-section-heading"><strong>Public market positions</strong><span>Wallet labels may be pseudonymous</span></div>
+    <div class="exposure-outcomes">${groups.map((group) => {
+      const positions = Array.isArray(group.positions) ? group.positions : [];
+      const rows = positions.length
+        ? positions.map((position) => {
+            const pnl = Number(position.total_pnl);
+            const pnlClass = Number.isNaN(pnl) || pnl === 0 ? '' : (pnl > 0 ? 'positive-value' : 'negative-value');
+            const verified = position.verified_profile ? '<span class="verified-mark">verified</span>' : '';
+            return `<tr>
+              <td><code title="${escapeHtml(position.wallet || '')}">${escapeHtml(position.display_name || 'Public wallet')}</code>${verified}</td>
+              <td>${formatNumber(position.size)}</td>
+              <td>${formatCents(position.average_price)}</td>
+              <td>${formatMoney(position.current_value)}</td>
+              <td class="${pnlClass}">${formatMoney(position.total_pnl)}</td>
+            </tr>`;
+          }).join('')
+        : '<tr><td colspan="5">No public position rows were returned for this outcome.</td></tr>';
+      return `<div class="exposure-outcome-card">
+        <h6>${escapeHtml(group.outcome || 'Outcome')}</h6>
+        <div class="position-table-wrap"><table class="position-table">
+          <thead><tr><th>Wallet / profile</th><th>Shares</th><th>Avg. entry</th><th>Current value</th><th>Total P&amp;L</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+    }).join('')}</div>`;
+}
+
+function publicExposureHolderHtml(exposure) {
+  const groups = Array.isArray(exposure.holder_groups) ? exposure.holder_groups : [];
+  if (!groups.length) return '';
+  return `
+    <div class="exposure-section-heading"><strong>Largest publicly returned holders</strong><span>Position profit was not available from this snapshot</span></div>
+    <div class="holder-groups">${groups.map((group) => {
+      const holders = Array.isArray(group.holders) ? group.holders : [];
+      const holdersHtml = holders.length
+        ? holders.map((holder) => `<span><code title="${escapeHtml(holder.wallet || '')}">${escapeHtml(holder.display_name || 'Public wallet')}</code> · ${formatNumber(holder.amount)} shares</span>`).join('')
+        : '<span>No holder rows returned for this outcome.</span>';
+      return `<div class="holder-group"><strong>${escapeHtml(group.outcome || 'Outcome')}</strong>${holdersHtml}</div>`;
+    }).join('')}</div>`;
+}
+
+function publicExposureTradesHtml(exposure) {
+  const trades = Array.isArray(exposure.recent_trades) ? exposure.recent_trades : [];
+  if (!trades.length) return '';
+  const visibility = exposure.visibility === 'wallet_level' ? 'Wallet-level' : 'Aggregate only';
+  return `
+    <div class="exposure-section-heading"><strong>Recent publicly returned trades</strong><span>${visibility}</span></div>
+    <div class="recent-trades-wrap"><table class="recent-trades-table">
+      <thead><tr><th>Time</th><th>Participant visibility</th><th>Outcome / side</th><th>Size</th><th>Price</th></tr></thead>
+      <tbody>${trades.map((trade) => `<tr>
+        <td>${escapeHtml(formatTimestamp(trade.timestamp))}</td>
+        <td><code title="${escapeHtml(trade.wallet || '')}">${escapeHtml(trade.display_name || 'Participant not public')}</code></td>
+        <td>${escapeHtml([trade.outcome, trade.side].filter(Boolean).join(' · '))}</td>
+        <td>${formatNumber(trade.size)}</td>
+        <td>${formatCents(trade.price)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+function renderPublicExposure(container, exposure) {
+  const openInterest = exposure.open_interest == null
+    ? ''
+    : `<p><strong>Reported open interest:</strong> ${formatNumber(exposure.open_interest)}</p>`;
+  const positionsHtml = publicExposurePositionHtml(exposure);
+  const holdersHtml = positionsHtml ? '' : publicExposureHolderHtml(exposure);
+  const tradesHtml = publicExposureTradesHtml(exposure);
+  const sourceWarnings = [
+    ['Position detail unavailable', exposure.positions_error],
+    ['Holder detail unavailable', exposure.holders_error],
+    ['Open-interest detail unavailable', exposure.open_interest_error],
+    ['Trade detail unavailable', exposure.trades_error],
+  ].filter(([, value]) => value)
+    .map(([label, value]) => `<p class="small-muted"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`)
+    .join('');
+  container.innerHTML = `
+    <p><strong>${escapeHtml(exposure.visibility_label || exposure.visibility || 'Public visibility')}:</strong> ${escapeHtml(exposure.detail || '')}</p>
+    ${openInterest}
+    ${positionsHtml}
+    ${holdersHtml}
+    ${tradesHtml}
+    ${sourceWarnings}
+    <small>Snapshot captured ${escapeHtml(formatTimestamp(exposure.captured_at || ''))}. ${escapeHtml(exposure.caveat || '')}</small>
+  `;
+}
+
+function setExposureButtons(marketId, label, disabled = false) {
+  document.querySelectorAll(`[data-load-public-exposure][data-market-id="${CSS.escape(String(marketId))}"]`).forEach((button) => {
+    button.disabled = disabled;
+    button.textContent = label;
+  });
+}
+
+function renderExposureEverywhere(marketId, exposure) {
+  document.querySelectorAll(`[data-public-exposure-panel][data-market-id="${CSS.escape(String(marketId))}"] [data-public-exposure-content]`).forEach((content) => {
+    renderPublicExposure(content, exposure);
+  });
+}
+
+document.querySelectorAll('[data-load-public-exposure]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const marketId = button.dataset.marketId;
+    setExposureButtons(marketId, 'Checking…', true);
+    try {
+      const response = await fetch(`/api/contracts/${encodeURIComponent(marketId)}/public-exposure`, { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Could not load public exposure');
+      renderExposureEverywhere(marketId, payload);
+      setExposureButtons(marketId, 'Refresh public visibility', false);
+      showToast('Public visibility snapshot saved. Visibility is a clue—not a verdict.');
+    } catch (error) {
+      setExposureButtons(marketId, 'Capture public visibility', false);
+      const panels = document.querySelectorAll(`[data-public-exposure-panel][data-market-id="${CSS.escape(String(marketId))}"] [data-public-exposure-content]`);
+      panels.forEach((content) => {
+        content.innerHTML = `<p class="exposure-error"><strong>Could not capture this source:</strong> ${escapeHtml(error.message || 'Unknown error')}</p>`;
+      });
+      showToast(error.message || 'Could not load public exposure', true);
+    }
+  });
+});
+

@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
-from urllib.parse import quote
+from datetime import timedelta
+from typing import Any, Iterable
+from urllib.parse import quote, urlsplit
 
 import httpx
 
-from .models import MarketRecord, SourceFetchResult
+from .models import CollectorContext, MarketRecord, SourceFetchResult
 from .settings import Settings
 from .watchlist import WatchlistError, load_watchlist
 from .text import (
@@ -49,7 +50,7 @@ async def get_json(
     url: str,
     *,
     params: dict[str, Any] | None = None,
-    attempts: int = 4,
+    attempts: int = 5,
 ) -> dict[str, Any]:
     """Fetch JSON with conservative retries and diagnostic HTTP errors."""
     last_error: Exception | None = None
@@ -101,6 +102,23 @@ async def get_json(
         return payload
 
     if isinstance(last_error, httpx.RequestError):
+        host = urlsplit(url).hostname or url
+        detail = str(last_error)
+        lowered = detail.lower()
+        if any(
+            marker in lowered
+            for marker in (
+                "nodename nor servname",
+                "name or service not known",
+                "temporary failure in name resolution",
+                "getaddrinfo failed",
+            )
+        ):
+            raise CollectorTransportError(
+                f"DNS lookup failed for {host}. Check the current Wi-Fi, VPN, "
+                "Private Relay, or DNS connection; stored results remain available "
+                "and the next scheduled scan will retry."
+            )
         raise CollectorTransportError(f"Request failed for {url}: {last_error}")
     raise CollectorError(f"Request failed for {url}: {last_error}")
 
@@ -110,7 +128,10 @@ class MarketCollector(ABC):
 
     @abstractmethod
     async def fetch(
-        self, client: httpx.AsyncClient, settings: Settings
+        self,
+        client: httpx.AsyncClient,
+        settings: Settings,
+        context: CollectorContext | None = None,
     ) -> SourceFetchResult:
         raise NotImplementedError
 
@@ -191,9 +212,28 @@ class KalshiCollector(MarketCollector):
 
     @staticmethod
     def _base_urls(settings: Settings) -> list[str]:
-        """Return the official Kalshi hosts in priority order without duplicates."""
-        values = [settings.kalshi_base_url, settings.kalshi_fallback_base_url]
+        """Return officially supported Kalshi hosts in local priority order."""
+        primary = settings.kalshi_base_url
+        compatibility = settings.kalshi_fallback_base_url
+        if settings.kalshi_prefer_compatibility_host and compatibility:
+            values = [compatibility, primary]
+        else:
+            values = [primary, compatibility]
         return list(dict.fromkeys(value.rstrip("/") for value in values if value))
+
+    @staticmethod
+    def _chunks(values: Iterable[str], size: int) -> Iterable[tuple[str, ...]]:
+        batch: list[str] = []
+        for value in values:
+            clean = str(value).strip()
+            if not clean:
+                continue
+            batch.append(clean)
+            if len(batch) >= size:
+                yield tuple(batch)
+                batch = []
+        if batch:
+            yield tuple(batch)
 
     @staticmethod
     def _priority_series_tickers(settings: Settings) -> list[str]:
@@ -222,7 +262,10 @@ class KalshiCollector(MarketCollector):
         )
 
     async def fetch(
-        self, client: httpx.AsyncClient, settings: Settings
+        self,
+        client: httpx.AsyncClient,
+        settings: Settings,
+        context: CollectorContext | None = None,
     ) -> SourceFetchResult:
         records: dict[str, MarketRecord] = {}
         pages = 0
@@ -235,52 +278,59 @@ class KalshiCollector(MarketCollector):
                 if value
             )
         )
-        active_base_index = 0
+        preferred_base_url = working_base_url if working_base_url in base_urls else (
+            base_urls[0] if base_urls else None
+        )
 
         async def fetch_endpoint(
             path: str, params: dict[str, Any]
         ) -> dict[str, Any]:
             """Fetch a public Kalshi endpoint with supported-host failover."""
-            nonlocal active_base_index
+            nonlocal preferred_base_url
             last_error: CollectorError | None = None
+            candidates = list(
+                dict.fromkeys(
+                    value for value in (preferred_base_url, *base_urls) if value
+                )
+            )
 
-            for index in range(active_base_index, len(base_urls)):
-                base_url = base_urls[index]
+            for index, base_url in enumerate(candidates):
                 endpoint = f"{base_url}/{path.lstrip('/')}"
                 try:
                     payload = await get_json(client, endpoint, params=params)
-                    if index != active_base_index:
+                    if base_url != preferred_base_url:
                         logger.warning(
-                            "Kalshi collector switched to supported fallback host %s",
+                            "Kalshi collector switched to supported host %s",
                             base_url,
                         )
-                    active_base_index = index
+                    preferred_base_url = base_url
                     self._working_base_url = base_url
                     return payload
                 except CollectorHTTPError as exc:
                     last_error = exc
-                    can_fallback = index + 1 < len(base_urls)
-                    if can_fallback and exc.status_code in {403, 404}:
+                    if index + 1 < len(candidates) and exc.status_code in {403, 404}:
                         logger.warning(
                             "Kalshi host %s returned HTTP %s; trying %s",
                             base_url,
                             exc.status_code,
-                            base_urls[index + 1],
+                            candidates[index + 1],
                         )
                         continue
                     raise
                 except CollectorTransportError as exc:
                     last_error = exc
-                    if index + 1 < len(base_urls):
+                    if index + 1 < len(candidates):
                         logger.warning(
                             "Kalshi host %s was unreachable; trying %s",
                             base_url,
-                            base_urls[index + 1],
+                            candidates[index + 1],
                         )
                         continue
                     raise
 
-            raise last_error or CollectorError("No Kalshi API host is configured")
+            raise last_error or CollectorError(
+                "No available Kalshi API host remains for this request"
+            )
 
         async def fetch_page(params: dict[str, Any]) -> dict[str, Any]:
             return await fetch_endpoint("markets", params)
@@ -314,10 +364,12 @@ class KalshiCollector(MarketCollector):
                 return str(next_cursor) if next_cursor else None
 
             # Discover concrete series tickers matching configured family prefixes.
-            # This catches families whose actual series ticker adds an airport or
-            # geography suffix (for example a KXFLYCANC... airport series).
+            # A dependency rule may intentionally contain a family prefix such as
+            # KXFLYCANC, while the actual tradable series are KXFLYCANCJFK,
+            # KXFLYCANCLAX, and so on. A prefix must never be sent to Kalshi as if
+            # it were an exact series ticker.
             priority_prefixes = self._priority_series_tickers(settings)
-            priority_series = list(priority_prefixes)
+            priority_series: list[str] = []
             if priority_prefixes:
                 try:
                     series_payload = await fetch_endpoint(
@@ -344,55 +396,171 @@ class KalshiCollector(MarketCollector):
                                 priority_series.append(ticker)
                 except CollectorError as exc:
                     logger.warning(
-                        "Kalshi priority-series discovery failed; continuing with configured series: %s",
+                        "Kalshi priority-series list discovery failed; exact series "
+                        "checks will continue: %s",
                         exc,
                     )
 
-            # Query configured niche series first. This prevents a broad page cap
-            # from hiding a monitored contract family such as KXUSFLYCAN.
-            for series_ticker in priority_series:
-                for status in ("open", "unopened"):
-                    cursor: str | None = None
-                    series_pages = 0
-                    while series_pages < settings.kalshi_priority_series_page_limit:
-                        params: dict[str, Any] = {
-                            "status": status,
-                            "series_ticker": series_ticker,
-                            "limit": settings.kalshi_page_size,
-                        }
-                        if settings.kalshi_exclude_multivariate:
-                            params["mve_filter"] = "exclude"
-                        if cursor:
-                            params["cursor"] = cursor
-
-                        payload = await fetch_page(params)
-                        pages += 1
-                        series_pages += 1
-                        next_cursor = parse_payload(payload)
-                        if not next_cursor or next_cursor == cursor:
-                            break
-                        cursor = next_cursor
-                        if settings.kalshi_page_delay_seconds > 0:
-                            await asyncio.sleep(settings.kalshi_page_delay_seconds)
-                    if series_pages >= settings.kalshi_priority_series_page_limit and cursor:
-                        logger.warning(
-                            "Kalshi priority series %s reached its page limit",
-                            series_ticker,
+                # Some monitored families are themselves exact series tickers
+                # (for example KXUSFLYCAN). Verify each configured value through
+                # the single-series endpoint before querying /markets. Prefix-only
+                # values return 404/403 on some Kalshi hosts and are simply ignored.
+                for candidate in priority_prefixes:
+                    if candidate in priority_series:
+                        continue
+                    try:
+                        payload = await fetch_endpoint(
+                            f"series/{quote(candidate, safe='-')}", {}
                         )
+                        pages += 1
+                    except CollectorError as exc:
+                        logger.info(
+                            "Kalshi configured series value %s is a family prefix or "
+                            "is currently unavailable; it will not be queried as an "
+                            "exact series: %s",
+                            candidate,
+                            exc,
+                        )
+                        continue
+                    item = payload.get("series")
+                    if not isinstance(item, dict):
+                        continue
+                    ticker = str(item.get("ticker") or "").strip().upper()
+                    if ticker != candidate:
+                        continue
+                    series_metadata[ticker] = item
+                    priority_series.append(ticker)
 
-            # Open and unopened are fetched separately because Kalshi supports one
-            # status filter per request. Unopened contracts matter for early alerts.
-            broad_pages = 0
-            for status in ("open", "unopened"):
-                cursor = None
-                while broad_pages < settings.max_pages_per_source:
-                    params = {
-                        "status": status,
-                        "limit": settings.kalshi_page_size,
+            # Query verified niche series first. A failure in one optional series
+            # must not abort the entire Kalshi source; the broad open-market scan
+            # remains useful and may still contain the same contracts.
+            for series_ticker in priority_series:
+                try:
+                    for status in ("open", "unopened"):
+                        cursor: str | None = None
+                        series_pages = 0
+                        while series_pages < settings.kalshi_priority_series_page_limit:
+                            params: dict[str, Any] = {
+                                "status": status,
+                                "series_ticker": series_ticker,
+                                "limit": settings.kalshi_page_size,
+                            }
+                            if settings.kalshi_exclude_multivariate:
+                                params["mve_filter"] = "exclude"
+                            if cursor:
+                                params["cursor"] = cursor
+
+                            payload = await fetch_page(params)
+                            pages += 1
+                            series_pages += 1
+                            next_cursor = parse_payload(payload)
+                            if not next_cursor or next_cursor == cursor:
+                                break
+                            cursor = next_cursor
+                            if settings.kalshi_page_delay_seconds > 0:
+                                await asyncio.sleep(settings.kalshi_page_delay_seconds)
+                        if (
+                            series_pages >= settings.kalshi_priority_series_page_limit
+                            and cursor
+                        ):
+                            logger.warning(
+                                "Kalshi priority series %s reached its page limit",
+                                series_ticker,
+                            )
+                except CollectorError as exc:
+                    logger.warning(
+                        "Kalshi priority series %s could not be refreshed; continuing "
+                        "with the remaining series and broad scan: %s",
+                        series_ticker,
+                        exc,
+                    )
+                    continue
+
+            incremental = bool(
+                settings.kalshi_incremental_scan
+                and context is not None
+                and context.source_initialized
+                and context.last_success_at is not None
+            )
+
+            # Keep existing active matches current without traversing the full
+            # catalog. Kalshi supports comma-separated ticker retrieval, so the
+            # reviewer queue can refresh price, volume, status, and close times in
+            # bounded batches. Optional batch failures do not block discovery.
+            if (
+                incremental
+                and settings.kalshi_refresh_active_matches
+                and context is not None
+                and context.active_external_ids
+            ):
+                refreshed_batches = 0
+                for batch in self._chunks(
+                    context.active_external_ids, settings.kalshi_refresh_batch_size
+                ):
+                    params: dict[str, Any] = {
+                        "tickers": ",".join(batch),
+                        "limit": min(1000, max(1, len(batch))),
                     }
                     if settings.kalshi_exclude_multivariate:
-                        # Combination markets add substantial noise and volume but
-                        # rarely help company-risk monitoring.
+                        params["mve_filter"] = "exclude"
+                    try:
+                        payload = await fetch_page(params)
+                        pages += 1
+                        refreshed_batches += 1
+                        parse_payload(payload)
+                    except CollectorError as exc:
+                        logger.warning(
+                            "Kalshi active-match refresh batch failed; continuing "
+                            "with discovery: %s",
+                            exc,
+                        )
+                    if settings.kalshi_page_delay_seconds > 0:
+                        await asyncio.sleep(settings.kalshi_page_delay_seconds)
+                logger.info(
+                    "Kalshi incremental refresh checked %s active matched contract(s) "
+                    "in %s batch(es)",
+                    len(context.active_external_ids),
+                    refreshed_batches,
+                )
+
+            # Open and unopened are fetched separately because Kalshi supports one
+            # status filter per request. After a successful baseline, discovery is
+            # incremental: only contracts created since the last successful scan
+            # (with a safety overlap) are paged. This avoids re-reading roughly
+            # 100,000 catalog records every fifteen minutes.
+            broad_pages = 0
+            page_limit = (
+                settings.kalshi_incremental_page_limit
+                if incremental
+                else settings.max_pages_per_source
+            )
+            page_size = (
+                settings.kalshi_incremental_page_size
+                if incremental
+                else settings.kalshi_page_size
+            )
+            min_created_ts: int | None = None
+            if incremental and context is not None and context.last_success_at is not None:
+                discovery_start = context.last_success_at - timedelta(
+                    minutes=settings.kalshi_discovery_overlap_minutes
+                )
+                min_created_ts = max(0, int(discovery_start.timestamp()))
+                logger.info(
+                    "Kalshi incremental discovery begins at %s with a %s-minute overlap",
+                    discovery_start.isoformat(),
+                    settings.kalshi_discovery_overlap_minutes,
+                )
+
+            for status in ("open", "unopened"):
+                cursor = None
+                while broad_pages < page_limit:
+                    params = {
+                        "status": status,
+                        "limit": page_size,
+                    }
+                    if min_created_ts is not None:
+                        params["min_created_ts"] = min_created_ts
+                    if settings.kalshi_exclude_multivariate:
                         params["mve_filter"] = "exclude"
                     if cursor:
                         params["cursor"] = cursor
@@ -407,8 +575,11 @@ class KalshiCollector(MarketCollector):
                     if settings.kalshi_page_delay_seconds > 0:
                         await asyncio.sleep(settings.kalshi_page_delay_seconds)
 
-                if broad_pages >= settings.max_pages_per_source:
-                    logger.warning("Kalshi scan reached the configured page limit")
+                if broad_pages >= page_limit:
+                    mode = "incremental" if incremental else "baseline"
+                    logger.warning(
+                        "Kalshi %s discovery reached the configured page limit", mode
+                    )
                     break
 
             return SourceFetchResult(self.name, list(records.values()), pages)
@@ -556,7 +727,10 @@ class PolymarketCollector(MarketCollector):
         return records
 
     async def fetch(
-        self, client: httpx.AsyncClient, settings: Settings
+        self,
+        client: httpx.AsyncClient,
+        settings: Settings,
+        context: CollectorContext | None = None,
     ) -> SourceFetchResult:
         records: dict[str, MarketRecord] = {}
         pages = 0

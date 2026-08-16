@@ -26,3 +26,27 @@ def test_kalshi_supported_fallback_host_is_configured(monkeypatch) -> None:
     )
     assert settings.kalshi_page_size == 1000
     assert settings.kalshi_exclude_multivariate is True
+
+
+def test_kalshi_incremental_refresh_defaults(monkeypatch) -> None:
+    for name in (
+        "RAASCAL_KALSHI_PREFER_COMPATIBILITY_HOST",
+        "RAASCAL_KALSHI_INCREMENTAL_SCAN",
+        "RAASCAL_KALSHI_INCREMENTAL_PAGE_SIZE",
+        "RAASCAL_KALSHI_INCREMENTAL_PAGE_LIMIT",
+        "RAASCAL_KALSHI_DISCOVERY_OVERLAP_MINUTES",
+        "RAASCAL_KALSHI_REFRESH_ACTIVE_MATCHES",
+        "RAASCAL_KALSHI_REFRESH_BATCH_SIZE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.replace("RAASCAL_", "RW_"), raising=False)
+
+    settings = get_settings()
+
+    assert settings.kalshi_prefer_compatibility_host is True
+    assert settings.kalshi_incremental_scan is True
+    assert settings.kalshi_incremental_page_size == 250
+    assert settings.kalshi_incremental_page_limit == 12
+    assert settings.kalshi_discovery_overlap_minutes == 180
+    assert settings.kalshi_refresh_active_matches is True
+    assert settings.kalshi_refresh_batch_size == 50

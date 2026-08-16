@@ -79,10 +79,20 @@ class Settings:
     kalshi_fallback_base_url: str | None
     kalshi_page_size: int
     kalshi_page_delay_seconds: float
+    kalshi_prefer_compatibility_host: bool
+    kalshi_incremental_scan: bool
+    kalshi_incremental_page_size: int
+    kalshi_incremental_page_limit: int
+    kalshi_discovery_overlap_minutes: int
+    kalshi_refresh_active_matches: bool
+    kalshi_refresh_batch_size: int
     kalshi_exclude_multivariate: bool
     kalshi_priority_series_scan: bool
     kalshi_priority_series_page_limit: int
     polymarket_base_url: str
+    polymarket_data_api_url: str
+    public_holder_limit: int
+    public_trade_limit: int
     generic_webhook_url: str | None
     slack_webhook_url: str | None
     smtp_host: str | None
@@ -130,6 +140,25 @@ def get_settings() -> Settings:
         kalshi_page_delay_seconds=_float(
             "RAASCAL_KALSHI_PAGE_DELAY_SECONDS", 0.15, minimum=0.0
         ),
+        kalshi_prefer_compatibility_host=_bool(
+            "RAASCAL_KALSHI_PREFER_COMPATIBILITY_HOST", True
+        ),
+        kalshi_incremental_scan=_bool("RAASCAL_KALSHI_INCREMENTAL_SCAN", True),
+        kalshi_incremental_page_size=min(
+            1000, _int("RAASCAL_KALSHI_INCREMENTAL_PAGE_SIZE", 250)
+        ),
+        kalshi_incremental_page_limit=_int(
+            "RAASCAL_KALSHI_INCREMENTAL_PAGE_LIMIT", 12
+        ),
+        kalshi_discovery_overlap_minutes=_int(
+            "RAASCAL_KALSHI_DISCOVERY_OVERLAP_MINUTES", 180
+        ),
+        kalshi_refresh_active_matches=_bool(
+            "RAASCAL_KALSHI_REFRESH_ACTIVE_MATCHES", True
+        ),
+        kalshi_refresh_batch_size=min(
+            100, _int("RAASCAL_KALSHI_REFRESH_BATCH_SIZE", 50)
+        ),
         kalshi_exclude_multivariate=_bool(
             "RAASCAL_KALSHI_EXCLUDE_MULTIVARIATE", True
         ),
@@ -143,6 +172,12 @@ def get_settings() -> Settings:
             _env("RAASCAL_POLYMARKET_BASE_URL")
             or "https://gamma-api.polymarket.com"
         ).rstrip("/"),
+        polymarket_data_api_url=(
+            _env("RAASCAL_POLYMARKET_DATA_API_URL")
+            or "https://data-api.polymarket.com"
+        ).rstrip("/"),
+        public_holder_limit=min(20, _int("RAASCAL_PUBLIC_HOLDER_LIMIT", 5)),
+        public_trade_limit=min(100, _int("RAASCAL_PUBLIC_TRADE_LIMIT", 12)),
         generic_webhook_url=_env("RAASCAL_GENERIC_WEBHOOK_URL") or None,
         slack_webhook_url=_env("RAASCAL_SLACK_WEBHOOK_URL") or None,
         smtp_host=_env("RAASCAL_SMTP_HOST") or None,
