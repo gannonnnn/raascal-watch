@@ -55,10 +55,12 @@ def _outcome_focus(categories: list[str], roles: list[str]) -> str:
         {"engagement_manipulation", "user_growth", "popularity_and_ranking"}
     ):
         return "Public metric, adoption, or ranking threshold"
+    if "corporate_controlled_outcome" in category_set:
+        return "Company-controlled word, phrase, transcript, or disclosure outcome"
     if "financial_metric" in category_set:
         return "Reported company KPI or financial threshold"
     if category_set.intersection(
-        {"direct_control_and_advance_knowledge", "platform_action"}
+        {"direct_control_and_advance_knowledge", "platform_action", "corporate_controlled_outcome"}
     ):
         return "Controlled decision, release, statement, or enforcement outcome"
     if "benchmark_and_evaluation_integrity" in category_set:
@@ -100,6 +102,11 @@ def _organization_access_context(name: str) -> list[str]:
             "Data operations, licensing, corrections, and source-governance personnel",
             "Airline, airport, and data partners with early cancellation or status information",
         ]
+    if "earnings-call mention" in lowered or "corporate-controlled outcome" in lowered:
+        return [
+            "Executives, Investor Relations, Legal, Communications, finance reviewers, and corporate-secretary personnel with pre-public access",
+            "Agencies, transcript vendors, webcast or production partners, advisers, and contractors with access to prepared language or call systems",
+        ]
     if "apple app store" in lowered or "app store ranking" in lowered:
         return [
             "App developers, Growth teams, acquisition agencies, and distribution partners with advance campaign plans",
@@ -115,12 +122,19 @@ def _information_holders(
     items = _organization_access_context(organization.name)
 
     if category_set.intersection(
-        {"direct_control_and_advance_knowledge", "platform_action"}
-    ) or any("Direct control" in role for role in roles):
+        {"direct_control_and_advance_knowledge", "platform_action", "corporate_controlled_outcome"}
+    ) or any("Direct control" in role or "Corporate-controlled" in role for role in roles):
         items.extend(
             [
                 "Employees or executives who control the decision, wording, release, or announcement",
                 "Contractors, vendors, agencies, or partners with pre-public access",
+            ]
+        )
+    if "corporate_controlled_outcome" in category_set:
+        items.extend(
+            [
+                "Investor Relations, Legal, Communications, finance reviewers, and executives who draft or approve the prepared language",
+                "Transcript, webcast, production, agency, adviser, and vendor personnel who receive scripts or audio before public release",
             ]
         )
     if "availability_and_incident" in category_set:
@@ -130,7 +144,7 @@ def _information_holders(
                 "Vendors or partners with operational telemetry before public status updates",
             ]
         )
-    if "financial_metric" in category_set:
+    if "financial_metric" in category_set and "corporate_controlled_outcome" not in category_set:
         items.extend(
             [
                 "Finance, data, investor-relations, audit, and reporting personnel",
@@ -201,7 +215,7 @@ def _influence_actors(categories: list[str], roles: list[str]) -> list[str]:
                 "Actors able to alter data collection, source availability, or the evidence used in settlement",
             ]
         )
-    if "financial_metric" in category_set:
+    if "financial_metric" in category_set and "corporate_controlled_outcome" not in category_set:
         items.extend(
             [
                 "Account farms, transaction or subscription manipulators, and acquisition partners",
@@ -213,6 +227,13 @@ def _influence_actors(categories: list[str], roles: list[str]) -> list[str]:
     ):
         items.append(
             "The person or organization that directly controls the announcement, release, wording, pricing, enforcement, or decision"
+        )
+    if "corporate_controlled_outcome" in category_set:
+        items.extend(
+            [
+                "People who can add, remove, repeat, or avoid the deciding word or phrase before the call",
+                "Teams or vendors that control the official audio, transcript, corrections, or publication timing used for settlement",
+            ]
         )
     if "benchmark_and_evaluation_integrity" in category_set:
         items.extend(
@@ -239,9 +260,10 @@ def _information_advantage(categories: list[str], roles: list[str]) -> dict[str,
             "Reporting / KPI owner",
             "Benchmark / evaluation participant",
             "Decision owner",
+            "Corporate-controlled outcome / advance knowledge",
         }
     ) or category_set.intersection(
-        {"direct_control_and_advance_knowledge", "financial_metric", "platform_action"}
+        {"direct_control_and_advance_knowledge", "financial_metric", "platform_action", "corporate_controlled_outcome"}
     ):
         return {
             "level": "high",
@@ -305,7 +327,10 @@ def _cost_bearers(
                 "Leadership and investors relying on the metric as evidence of genuine demand",
             ]
         )
-    if "financial_metric" in category_set or "Reporting / KPI owner" in role_set:
+    if (
+        ("financial_metric" in category_set or "Reporting / KPI owner" in role_set)
+        and "corporate_controlled_outcome" not in category_set
+    ):
         items.extend(
             [
                 "Finance, Investor Relations, planning, and executive teams",
@@ -327,12 +352,19 @@ def _cost_bearers(
             ]
         )
     if category_set.intersection(
-        {"direct_control_and_advance_knowledge", "platform_action"}
-    ) or "Direct control / advance knowledge" in role_set:
+        {"direct_control_and_advance_knowledge", "platform_action", "corporate_controlled_outcome"}
+    ) or role_set.intersection({"Direct control / advance knowledge", "Corporate-controlled outcome / advance knowledge"}):
         items.extend(
             [
                 f"{organization.name} Legal, Compliance, Communications, and people-management teams",
                 "Employees, vendors, and partners subject to investigation after a suspected information leak",
+            ]
+        )
+    if "corporate_controlled_outcome" in category_set:
+        items.extend(
+            [
+                "Investor Relations, Corporate Compliance, Legal, Communications, and vendor-management teams responding to a possible pre-public information overlap",
+                "Employees and third parties whose ordinary access may be scrutinized after an unexplained market move",
             ]
         )
     if "benchmark_and_evaluation_integrity" in category_set:
@@ -390,6 +422,8 @@ def _resolution_sources(market: MarketRecord, organization: OrganizationWatch, r
 
     if any("Resolution-data source" in role for role in roles):
         items.insert(0, organization.name)
+    if organization.name.casefold() == "earnings-call mention markets":
+        items.insert(0, "Official company earnings-call audio, webcast, prepared remarks, or final transcript specified by the contract")
 
     items.append(f"The published {market.source.title()} contract rules and named settlement source")
     return unique_strings(items)[:4]
@@ -417,6 +451,26 @@ def _cascade(categories: list[str], metric_label: str) -> list[dict[str, str]]:
             {
                 "stage": "Potential cost",
                 "detail": "The company invests in a false signal, delays higher-value work, degrades customer experience, or reports misleading success.",
+            },
+        ]
+
+    if "corporate_controlled_outcome" in category_set:
+        return [
+            {
+                "stage": "External incentive",
+                "detail": "Money is attached to whether a company uses, repeats, or avoids specific language during a controlled public disclosure.",
+            },
+            {
+                "stage": "Pre-public overlap",
+                "detail": "Executives, reviewers, agencies, advisers, transcript vendors, and production partners may see or alter the language before the public call.",
+            },
+            {
+                "stage": "Review trigger",
+                "detail": "Unusual market movement before disclosure can prompt policy, access, vendor, communications, and preservation reviews.",
+            },
+            {
+                "stage": "Potential cost",
+                "detail": "Even without proven misuse, the organization can absorb investigation, employee-trust, vendor-governance, disclosure, and reputational costs.",
             },
         ]
 
@@ -499,6 +553,8 @@ def _cascade(categories: list[str], metric_label: str) -> list[dict[str, str]]:
                 "detail": "Roadmaps, claims, spend, and customer expectations can be shaped by an evaluation that does not generalize.",
             },
         ]
+
+
 
     if category_set.intersection(
         {"direct_control_and_advance_knowledge", "platform_action"}
@@ -627,6 +683,8 @@ def _field_note_headline(categories: list[str], roles: list[str], profile_name: 
     category_set = set(categories)
     if profile_name.casefold() in {"apple app store", "app store ranking markets"}:
         return "The metric moved. Did demand?"
+    if profile_name.casefold() in {"earnings-call mention markets", "corporate-controlled outcomes"}:
+        return "What if the answer is already in the script?"
     if "oracle_and_data_dependency" in category_set or any(
         "Resolution-data" in role for role in roles
     ):
@@ -692,6 +750,7 @@ def build_incentive_map(
     roles: list[str],
     categories: list[str],
     metric_label: str,
+    dynamic_subjects: list[str] | None = None,
 ) -> dict[str, Any]:
     probability = _clip_probability(market.probability)
     yes_price = probability
@@ -701,6 +760,7 @@ def build_incentive_map(
         "version": 1,
         "headline": _field_note_headline(categories, roles, organization.name),
         "outcome_focus": _outcome_focus(categories, roles),
+        "dynamic_subjects": list(dynamic_subjects or []),
         "benefit_sides": [
             _position_side(
                 "YES",

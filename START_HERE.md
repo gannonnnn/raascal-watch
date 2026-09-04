@@ -83,9 +83,24 @@ Use the profile filter in two complementary ways:
 - Select **App Store ranking markets — theme** to see active contracts tied to public App Store chart outcomes.
 - Select **Apple App Store** to review the platform as metric owner and potential resolution source.
 
-RaaScal Watch extracts changing app/company outcomes dynamically and displays them as **Dynamic subjects / outcomes** on the contract card. It does not automatically create a permanent organization profile or accuse the named app of manipulation.
+RaaScal Watch extracts changing app/company outcomes dynamically and displays them as **Dynamic apps / outcomes** on the contract card. It does not automatically create a permanent organization profile or accuse the named app of manipulation.
 
 The tailored guidance asks whether ranking movement reflects durable users or concentrated paid, coordinated, automated, review-driven, or low-retention activity before Product, Growth, Engineering, or leadership treats the signal as organic demand.
+
+## Earnings-call mention monitoring
+
+Select **Earnings-call mention markets — theme** to review contracts tied to words, phrases, mention counts, prepared remarks, official call audio, or transcripts.
+
+RaaScal Watch extracts the changing company and controlled outcome dynamically. A result may display:
+
+```text
+Company: Dell
+Controlled outcome: Agentic
+```
+
+The review panel focuses on direct control, pre-public access, settlement timing, policy coverage, external vendors, and unexplained market movement. A theme match is not evidence that an employee, executive, vendor, or trader misused information.
+
+Use **Open Field Note** for the screenshot-ready headline **What if the answer is already in the script?**
 
 ## Incentive Maps, Field Notes, and post-close review
 

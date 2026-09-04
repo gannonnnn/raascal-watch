@@ -216,7 +216,7 @@ def test_dashboard_explains_materiality_and_app_store_profiles(tmp_path: Path, m
     assert "Contracts warranting review today" in response.text
     assert "App Store ranking markets" in response.text
     assert "Apple App Store" in response.text
-    assert "Dynamic subjects / outcomes" in response.text
+    assert "Dynamic apps / outcomes" in response.text
     assert "ChatGPT" in response.text
     assert "Is this more than a keyword monitor?" in response.text
     assert "Why the retrieval score is" in response.text

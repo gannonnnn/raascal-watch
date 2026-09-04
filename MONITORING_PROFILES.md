@@ -1,6 +1,18 @@
 # RaaScal Watch monitoring profiles
 
-RaaScal Watch treats every result as a **candidate match**, not proof of abuse. Version 0.8 separates broad observed intelligence from contracts that warrant human review today.
+RaaScal Watch treats every result as a **candidate match**, not proof of abuse. Version 0.9 separates broad observed intelligence from contracts that warrant human review today and adds company-controlled earnings-call outcomes.
+
+## Earnings-call mention markets — monitored theme
+
+**What is monitored:** contracts resolved by a company saying, mentioning, repeating, or avoiding an exact word, phrase, or mention threshold during an earnings call, investor call, prepared remarks, official audio, webcast, or transcript.
+
+**Why it matters:** a relatively small group may know the answer before public disclosure, and some of those people may directly control the language that determines settlement. The relevant group can extend beyond executives to Investor Relations, Legal, Communications, finance reviewers, agencies, advisers, transcript vendors, production partners, and contractors.
+
+**Dynamic subjects:** RaaScal Watch extracts both the changing company and the controlled outcome, such as `Company: Dell` and `Controlled outcome: Agentic`. These labels are descriptive and do not establish that anyone with access traded or acted improperly.
+
+**Materiality:** the contract becomes a human-review candidate only when direct control or pre-public access is paired with an activation trigger such as near-term settlement, reported economic activity, material market movement, or another independent indicator.
+
+**Likely owners:** Corporate Compliance, Insider Risk, Legal, Investor Relations, Communications, Corporate Secretary, and Vendor Risk.
 
 ## App Store ranking markets — monitored theme
 

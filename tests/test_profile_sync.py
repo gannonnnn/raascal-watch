@@ -75,8 +75,10 @@ def test_watchlist_merge_adds_missing_profiles_and_preserves_custom_values(
     assert summary.changed is True
     assert "FlightAware" in summary.added_organizations
     assert "OpenAI / ChatGPT" in summary.added_organizations
+    assert "Earnings-call mention markets" in summary.added_organizations
     assert "FlightAware" in names
     assert "OpenAI / ChatGPT" in names
+    assert "Earnings-call mention markets" in names
     assert "Custom Company" in names
 
     spotify = next(item for item in watchlist.organizations if item.name == "Spotify")
@@ -156,6 +158,8 @@ def test_dashboard_filter_lists_every_enabled_profile_even_with_zero_matches(
     assert "FlightAware (0 active)" in response.text
     assert 'value="OpenAI / ChatGPT"' in response.text
     assert "OpenAI / ChatGPT (0 active)" in response.text
+    assert 'value="Earnings-call mention markets"' in response.text
+    assert "Earnings-call mention markets — theme (0 active)" in response.text
 
 
 def test_sync_profiles_backfills_known_flight_cancellation_families_without_name(
@@ -331,3 +335,57 @@ def test_profile_sync_backfills_flightaware_from_stored_series_metadata(
     rows = database.list_matches(organization="FlightAware", view="active")
     assert len(rows) == 1
     assert rows[0]["match_basis"] == "verified_dependency"
+
+
+
+def test_sync_profiles_backfills_earnings_call_theme_from_existing_market_library(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "watchlist.yaml"
+    _legacy_watchlist(current)
+    settings = _settings(tmp_path, current)
+    database = Database(settings.db_path)
+    database.initialize()
+
+    market = MarketRecord(
+        source="polymarket",
+        external_id="dell-agentic-existing",
+        title=(
+            "What will Dell say during their next earnings call? — "
+            'Will Dell say "Agentic" during their next earnings call?'
+        ),
+        description=(
+            "Resolves using the official Dell earnings-call audio and final transcript."
+        ),
+        status="open",
+        created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        closes_at=datetime.now(timezone.utc) + timedelta(days=2),
+        probability=0.88,
+        volume=9_175,
+        raw={
+            "event": {
+                "id": "dell-call-existing",
+                "title": "What will Dell say during their next earnings call?",
+            },
+            "market": {
+                "id": "dell-agentic-existing",
+                "question": 'Will Dell say "Agentic" during their next earnings call?',
+                "groupItemTitle": "Agentic",
+            },
+        },
+    )
+    database.upsert_market(market, datetime.now(timezone.utc))
+
+    summary = sync_profiles(database, current, DEFAULTS, force_rebuild=False)
+
+    assert summary.rebuild is not None
+    assert summary.rebuild.active_matches_added >= 1
+    rows = database.list_matches(
+        organization="Earnings-call mention markets", view="active"
+    )
+    assert len(rows) == 1
+    assert rows[0]["external_id"] == "dell-agentic-existing"
+    assert rows[0]["match_basis"] == "theme"
+    assert rows[0]["alert_state"] == "historical"
+    assert "Company: Dell" in rows[0]["dynamic_subjects"]
+    assert "Controlled outcome: Agentic" in rows[0]["dynamic_subjects"]

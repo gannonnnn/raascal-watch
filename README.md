@@ -23,6 +23,39 @@ The company named in the market is not always the only party exposed. An organiz
 
 RaaScal Watch is intended to surface that changed incentive environment before the signal is accepted at face value.
 
+## Version 0.9: earnings-call mention markets and corporate-controlled outcomes
+
+RaaScal Watch now includes **Earnings-call mention markets** as a monitored theme. It surfaces contracts resolved by a company saying, mentioning, repeating, or avoiding a specific word or phrase during an earnings call or investor call.
+
+The theme dynamically extracts the company and controlled outcome from source metadata, for example:
+
+```text
+Company: Dell
+Controlled outcome: Agentic
+```
+
+These contracts create a different risk pathway from metric manipulation. A relatively small group may have pre-public access to prepared remarks, scripts, rehearsals, webcast systems, call audio, or transcript feeds—and some participants may be able to directly alter the deciding language.
+
+The materiality gate evaluates:
+
+- direct control over the statement or transcript;
+- narrow pre-public information access;
+- reported economic activity and settlement proximity;
+- probability, volume, open-interest, rule, and close-time movement; and
+- potential compliance, vendor, disclosure, employee-trust, and reputational cost.
+
+A theme match is not an accusation and does not automatically create an investigation. RaaScal Watch places the contract in **Review today** only when a credible access or control pathway is paired with a current activation trigger. It still requires independent evidence before any conclusion about information misuse or misconduct.
+
+The contract-specific review now asks who had access, who could change the answer, whether employee and vendor policies cover prediction markets, which official audio or transcript settles the outcome, and whether market movement preceded a legitimate public catalyst.
+
+The Field Note headline for this theme is:
+
+> **What if the answer is already in the script?**
+
+Version 0.9 also corrects theme-specific guidance so App Store ranking and earnings-call contracts no longer inherit flight-cancellation questions or next steps.
+
+See `UPDATE_NOTES_V0_9.md` for the dynamic extraction, materiality behavior, migration details, and limitations.
+
 ## Version 0.8: materiality gates and App Store ranking monitoring
 
 RaaScal Watch now separates the full candidate library from the small set of contracts that warrant human attention today. The default dashboard is no longer a wall of high-scoring matches. It uses three materiality gates:
@@ -168,6 +201,8 @@ The normal dashboard now shows **live public-market records only**.
 - Directly queries priority Kalshi series so niche monitored families are not lost behind the broad page cap
 - After baseline, refreshes active matched Kalshi contracts by ticker and discovers only newly created contracts with an overlap window
 - Detects references to companies, products, executives, public data sources, monitored metrics, and contract topics
+- Extracts dynamic companies, apps, and controlled word/phrase outcomes from theme-based contract families
+- Distinguishes company-controlled disclosure outcomes from metric manipulation, outages, reporting metrics, and data dependencies
 - Labels each relationship as direct, verified dependency, linked dependency, possible dependency, or theme
 - Assigns a transparent rule-based priority score
 - Explains the terms and market attributes that contributed to the score
@@ -202,8 +237,15 @@ The default watchlist includes enabled organization profiles for:
 - **YouTube** — views, subscribers, trending, platform integrity, and public counters
 - **MrBeast / Beast Industries** — creator-controlled outcomes, advance knowledge, and engagement milestones
 - **OpenAI / ChatGPT** — release timing, outages, benchmark integrity, pricing, rankings, valuation, and advance knowledge
+- **Apple App Store** — public ranking metrics, chart integrity, dynamic app outcomes, and resolution-source dependencies
 
-It also includes the monitored theme **Flight cancellation markets**, which surfaces relevant contracts without automatically attributing them to FlightAware. A single contract may intentionally carry both a theme and one or more organization relationships. See `MONITORING_PROFILES.md` for the rationale.
+It also includes monitored themes for:
+
+- **Flight cancellation markets** — operational disruption and source-data dependencies without automatically attributing every contract to FlightAware;
+- **App Store ranking markets** — dynamic app outcomes and false-demand signals; and
+- **Earnings-call mention markets** — company-controlled words, phrases, transcripts, and pre-public access pathways.
+
+A single contract may intentionally carry a theme and one or more organization relationships. See `MONITORING_PROFILES.md` for the rationale.
 
 ## Start RaaScal Watch on a Mac
 

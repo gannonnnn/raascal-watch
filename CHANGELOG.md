@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 — Earnings-call mention markets and corporate-controlled outcomes
+
+- Added the **Earnings-call mention markets** monitored theme.
+- Extracts the changing company and exact controlled word, phrase, or threshold from Kalshi and Polymarket metadata.
+- Added a **corporate-controlled outcome** risk pathway with direct-control, pre-public-access, policy-coverage, and vendor-access analysis.
+- Added earnings-call-specific materiality, review questions, next steps, Incentive Maps, and Field Note headline.
+- Corrected theme guidance so App Store and earnings-call markets no longer receive flight-cancellation questions.
+- Added migration coverage for watchlist merging and stored-market re-evaluation.
+
 ## 0.8.0 — Materiality gates and App Store ranking monitoring
 
 - Added **Observed**, **Review today**, and **Escalate now** materiality gates so broad candidate retrieval no longer becomes the default human queue.

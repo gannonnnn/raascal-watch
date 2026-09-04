@@ -223,7 +223,10 @@ def _dimension_scores(categories: list[str], roles: list[str], profile_name: str
 
     if "explicit_abuse_language" in category_set:
         add(influence_candidates, 95, "The contract language itself references manipulation, automation, disruption, or coordinated abuse.")
-    if "direct_control_and_advance_knowledge" in category_set or "Direct control / advance knowledge" in role_set:
+    if (
+        category_set.intersection({"direct_control_and_advance_knowledge", "corporate_controlled_outcome"})
+        or role_set.intersection({"Direct control / advance knowledge", "Corporate-controlled outcome / advance knowledge"})
+    ):
         add(influence_candidates, 90, "A person or organization may directly control the release, statement, timing, or answer.")
         add(information_candidates, 92, "A limited group may know the answer before public disclosure.")
         add(downstream_candidates, 75, "A suspected leak or controlled outcome can create legal, governance, communications, and trust costs.")
@@ -267,6 +270,11 @@ def _dimension_scores(categories: list[str], roles: list[str], profile_name: str
         add(influence_candidates, 82, "App installs, paid acquisition, reviews, searches, and promotion can affect a public App Store ranking.")
         add(information_candidates, 58, "App developers and acquisition partners may know planned campaigns before the ranking window.")
         add(downstream_candidates, 90, "A small company may treat an externally incentivized ranking spike as genuine demand and redirect Engineering or Growth.")
+
+    if profile_name.casefold() in {"earnings-call mention markets", "corporate-controlled outcomes"}:
+        add(influence_candidates, 94, "A small group can directly add, remove, repeat, or avoid the deciding language before the public call.")
+        add(information_candidates, 96, "Prepared remarks, scripts, rehearsals, transcript feeds, and production systems can create a narrow pre-public access group.")
+        add(downstream_candidates, 84, "A suspected overlap between trading and pre-public access can trigger compliance, vendor, disclosure, and employee-trust costs.")
 
     def summarize(items: list[tuple[int, str]], fallback: str) -> dict[str, Any]:
         if not items:
@@ -398,7 +406,7 @@ def _calculate_gate(
     if "explicit_abuse_language" in category_set and influence >= 85 and (economic >= 55 or urgency >= 70):
         drivers.append("Explicit abuse language is paired with material activity or near-term settlement.")
         return "escalate", drivers
-    if "direct_control_and_advance_knowledge" in category_set and information >= 85 and economic >= 70 and urgency >= 55:
+    if category_set.intersection({"direct_control_and_advance_knowledge", "corporate_controlled_outcome"}) and information >= 85 and economic >= 70 and urgency >= 55:
         drivers.append("A narrow pre-public access group, meaningful market activity, and approaching settlement coincide.")
         return "escalate", drivers
     if "availability_and_incident" in category_set and influence >= 65 and economic >= 75 and urgency >= 70:

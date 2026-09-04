@@ -105,7 +105,10 @@
         </div>
       </div>
       {% if item.dynamic_subjects %}
-        <div class="dynamic-subject-line"><span>Dynamic subjects / outcomes</span><div>{% for subject in item.dynamic_subjects %}<strong>{{ subject }}</strong>{% endfor %}</div></div>
+        <div class="dynamic-subject-line">
+          <span>{% if 'Earnings-call mention markets' in item.organizations %}Dynamic company / controlled outcomes{% elif 'App Store ranking markets' in item.organizations %}Dynamic apps / outcomes{% else %}Dynamic subjects / outcomes{% endif %}</span>
+          <div>{% for subject in item.dynamic_subjects %}<strong>{{ subject }}</strong>{% endfor %}</div>
+        </div>
       {% endif %}
 
       <div class="metric-row">

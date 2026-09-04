@@ -90,6 +90,7 @@ def _metric_phrase(metric_hits: list[str], categories: list[str]) -> str:
         "oracle_and_data_dependency": "resolution data or public evidence",
         "benchmark_and_evaluation_integrity": "benchmark or evaluation result",
         "direct_control_and_advance_knowledge": "announcement or controlled outcome",
+        "corporate_controlled_outcome": "company-controlled language or disclosure outcome",
         "engagement_manipulation": "public engagement metric",
         "user_growth": "user-growth metric",
         "financial_metric": "reported financial or company metric",
@@ -164,13 +165,26 @@ def _infer_roles(
     categories: list[str],
     match_basis: str,
     is_theme: bool,
+    profile_name: str,
 ) -> list[str]:
     category_set = set(categories)
     roles: list[str] = []
 
     if is_theme:
         roles.append("Monitored theme / contract family")
-        return roles
+        normalized_profile = profile_name.casefold()
+        if normalized_profile == "earnings-call mention markets":
+            roles.extend(
+                [
+                    "Corporate-controlled outcome / advance knowledge",
+                    "Official call or transcript resolution source",
+                ]
+            )
+        elif normalized_profile == "app store ranking markets":
+            roles.append("Public ranking / metric theme")
+        elif normalized_profile == "flight cancellation markets":
+            roles.append("Operational disruption / data-source theme")
+        return unique_strings(roles)
 
     if match_basis.endswith("_dependency"):
         roles.append("Resolution-data source / oracle")
@@ -228,13 +242,41 @@ def _build_review_questions(
     ]
 
     if "Monitored theme / contract family" in role_set:
-        questions.extend(
-            [
-                "Which organization supplies the primary and fallback cancellation data for this exact contract family?",
-                "Does the contract measure a cancellation count, rate, threshold, airport-specific outcome, or nationwide total?",
-                "Which actors could know or influence the result—airlines, airport operators, data providers, labor groups, weather services, or public authorities?",
-            ]
-        )
+        normalized_profile = organization.name.casefold()
+        if normalized_profile == "flight cancellation markets":
+            questions.extend(
+                [
+                    "Which organization supplies the primary and fallback cancellation data for this exact contract family?",
+                    "Does the contract measure a cancellation count, rate, threshold, airport-specific outcome, or nationwide total?",
+                    "Which actors could know or influence the result—airlines, airport operators, data providers, labor groups, weather services, or public authorities?",
+                ]
+            )
+        elif normalized_profile == "app store ranking markets":
+            questions.extend(
+                [
+                    "Which app or company is the dynamic outcome, and which Apple chart, geography, category, device, and observation time settle the contract?",
+                    "Could paid acquisition, incentivized installs, reviews, searches, or concentrated device and geography patterns move the public ranking?",
+                    "Would the app company mistake a settlement-window spike for durable demand, and which internal dashboard or roadmap decision would be affected?",
+                ]
+            )
+        elif normalized_profile == "earnings-call mention markets":
+            questions.extend(
+                [
+                    "Which company and exact word, phrase, or mention threshold determine settlement?",
+                    "Who had pre-public access to prepared remarks, scripts, rehearsals, official audio, transcripts, or vendor production systems?",
+                    "Could anyone with that access directly add, remove, or repeat the deciding language before the call?",
+                    "Do employee, contractor, vendor, and household trading policies explicitly cover prediction markets and event contracts?",
+                    "Did price, volume, open interest, or holder concentration move before a legitimate public catalyst?",
+                ]
+            )
+        else:
+            questions.extend(
+                [
+                    "Which organization owns, controls, measures, or supplies the deciding outcome?",
+                    "Who could know the answer before public disclosure or realistically influence it?",
+                    "What additional evidence would make the theme operationally actionable rather than informational?",
+                ]
+            )
 
     if "Resolution-data source / oracle" in role_set:
         questions.append(
@@ -246,9 +288,9 @@ def _build_review_questions(
             f"Does the public {metric_label} match controlled internal telemetry, and which abuse patterns could move it before settlement?"
         )
 
-    if "Direct control / advance knowledge" in role_set:
+    if "Direct control / advance knowledge" in role_set or "Corporate-controlled outcome / advance knowledge" in role_set:
         questions.append(
-            "Who can directly control the answer or know it before public release—employees, contractors, vendors, launch partners, creators, or agencies?"
+            "Who can directly control the answer or know it before public release—employees, executives, contractors, vendors, advisers, production partners, or agencies?"
         )
 
     if "Availability / incident target" in role_set:
@@ -303,12 +345,37 @@ def _build_contract_actions(
     ]
 
     if "Monitored theme / contract family" in role_set:
-        actions.extend(
-            [
-                "Identify the market's product family, threshold, airport or geography, time window, and primary/fallback source agency before assigning an organizational owner.",
-                "Map the parties that may possess advance operational information, including airlines, airport operators, air-traffic authorities, labor groups, data vendors, and government agencies.",
-            ]
-        )
+        normalized_profile = organization.name.casefold()
+        if normalized_profile == "flight cancellation markets":
+            actions.extend(
+                [
+                    "Identify the market's product family, threshold, airport or geography, time window, and primary/fallback source agency before assigning an organizational owner.",
+                    "Map the parties that may possess advance operational information, including airlines, airport operators, air-traffic authorities, labor groups, data vendors, and government agencies.",
+                ]
+            )
+        elif normalized_profile == "app store ranking markets":
+            actions.extend(
+                [
+                    "Identify the app or company named as the dynamic outcome and confirm the exact App Store chart, geography, category, device, and observation time used for settlement.",
+                    "Compare the ranking window with acquisition source, retention, geography, device concentration, paid campaigns, search activity, and review velocity before treating the movement as customer demand.",
+                    "Add a caveat to affected Growth and Product dashboards until the post-settlement cohort demonstrates durable, organic behavior.",
+                ]
+            )
+        elif normalized_profile == "earnings-call mention markets":
+            actions.extend(
+                [
+                    "Identify the company and exact word, phrase, or mention threshold that resolves the contract, and preserve the official settlement language.",
+                    "Map pre-public access across executives, Investor Relations, Legal, Communications, finance reviewers, agencies, transcript vendors, production partners, and household-policy coverage.",
+                    "Compare market movement with drafting, approval, rehearsal, distribution, and public-call timestamps; escalate only when credible access overlaps with unusual timing or another independent indicator.",
+                ]
+            )
+        else:
+            actions.extend(
+                [
+                    "Resolve the dynamic subject and the organization that owns, controls, measures, or supplies the deciding outcome before assigning an alert owner.",
+                    "Document the evidence required to move this theme from observed intelligence to a human review.",
+                ]
+            )
 
     if "Resolution-data source / oracle" in role_set:
         actions.append(
@@ -320,9 +387,9 @@ def _build_contract_actions(
             f"Validate the referenced {metric_label} against the canonical internal measure, then segment unusual movement by account age, device, geography, referral source, paid promotion, automation indicators, and retention."
         )
 
-    if "Direct control / advance knowledge" in role_set:
+    if "Direct control / advance knowledge" in role_set or "Corporate-controlled outcome / advance knowledge" in role_set:
         actions.append(
-            f"Map the people and third parties with pre-public access to the {metric_label} or announcement timeline, and preserve the relevant access, approval, production, and release records through settlement."
+            f"Map the people and third parties with pre-public access to the {metric_label} or announcement timeline, and preserve the relevant access, drafting, approval, rehearsal, production, and release records through settlement."
         )
 
     if "Availability / incident target" in role_set:
@@ -343,6 +410,11 @@ def _build_contract_actions(
     if "Decision owner" in role_set:
         actions.append(
             "Identify the internal decision owner and test whether reports, complaints, queue pressure, publication timing, pricing, or enforcement actions could be used to influence the result before close."
+        )
+
+    if "corporate_controlled_outcome" in category_set:
+        actions.append(
+            "Confirm that employee, contractor, vendor, adviser, and household trading policies cover prediction markets; preserve the official call audio or transcript and any material market movement without treating a profitable position as proof of misuse."
         )
 
     if "explicit_abuse_language" in category_set:
@@ -527,6 +599,15 @@ class RiskEngine:
             hits = find_phrases(text, category.terms)
             if not hits:
                 continue
+            # Earnings-call word/phrase markets are controlled-language outcomes,
+            # not forecasts of the underlying financial KPI. A phrase such as
+            # “earnings” or “revenue” should not add generic KPI-manipulation
+            # guidance or inflate the retrieval score for this monitored theme.
+            if (
+                organization.name.casefold() == "earnings-call mention markets"
+                and category.name == "financial_metric"
+            ):
+                continue
             add_points(
                 category.weight,
                 category.name.replace("_", " ").title(),
@@ -635,9 +716,24 @@ class RiskEngine:
             categories=categories,
             match_basis=match_basis,
             is_theme=organization.is_theme,
+            profile_name=organization.name,
         )
         reasons.append(f"Likely profile role: {', '.join(roles)}.")
+        dynamic_subjects = extract_dynamic_subjects(
+            market,
+            profile_name=organization.name,
+            categories=categories,
+        )
         metric_label = _metric_phrase(metric_hits, categories)
+        if organization.name.casefold() == "earnings-call mention markets":
+            controlled = next(
+                (value.split(":", 1)[1].strip() for value in dynamic_subjects if value.startswith("Controlled outcome:")),
+                None,
+            )
+            if controlled:
+                metric_label = f'controlled phrase or threshold “{controlled}”'
+        elif organization.name.casefold() in {"apple app store", "app store ranking markets"} and dynamic_subjects:
+            metric_label = f"App Store ranking for {dynamic_subjects[0]}"
         review_questions = _build_review_questions(
             organization=organization,
             roles=roles,
@@ -658,11 +754,7 @@ class RiskEngine:
             roles=roles,
             categories=categories,
             metric_label=metric_label,
-        )
-        dynamic_subjects = extract_dynamic_subjects(
-            market,
-            profile_name=organization.name,
-            categories=categories,
+            dynamic_subjects=dynamic_subjects,
         )
 
         raw_score = score

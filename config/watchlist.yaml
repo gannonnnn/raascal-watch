@@ -1,4 +1,4 @@
-version: 7
+version: 8
 organizations:
 - name: Spotify
   enabled: true
@@ -67,9 +67,12 @@ organizations:
   - Incident Response
   - Legal
   playbook:
-  - Correlate market creation, odds movement, and settlement timing with service telemetry, DDoS signals, vulnerability reports, and threat-intelligence activity.
-  - Preserve a snapshot of the contract and relevant security or availability logs without treating the market itself as proof of an attack.
-  - Escalate unusual market activity near settlement to Security Operations and Site Reliability Engineering for a time-bound review.
+  - Correlate market creation, odds movement, and settlement timing with service telemetry, DDoS signals, vulnerability
+    reports, and threat-intelligence activity.
+  - Preserve a snapshot of the contract and relevant security or availability logs without treating the market itself
+    as proof of an attack.
+  - Escalate unusual market activity near settlement to Security Operations and Site Reliability Engineering for
+    a time-bound review.
   profile_type: organization
 - name: FlightAware
   enabled: true
@@ -109,8 +112,10 @@ organizations:
   - Product Integrity
   - Aviation Operations
   playbook:
-  - Preserve the market rules and determine whether FlightAware is named as a primary, fallback, or verification source.
-  - Confirm whether use of FlightAware data, APIs, links, names, or trademarks is authorized under applicable licenses and terms.
+  - Preserve the market rules and determine whether FlightAware is named as a primary, fallback, or verification
+    source.
+  - Confirm whether use of FlightAware data, APIs, links, names, or trademarks is authorized under applicable licenses
+    and terms.
   - Assess whether the contract creates incentives to disrupt flights, airports, carrier operations, or data availability.
   - Review unusual scraping or API traffic around settlement without treating the market itself as evidence of abuse.
   profile_type: organization
@@ -133,7 +138,8 @@ organizations:
     theme: Flight cancellation markets
     categories:
     - oracle_and_data_dependency
-    evidence: Kalshi's AIRPORTDELAY product terms identify FlightAware as the primary Source Agency for the KXFLYCANC airport-cancellation family.
+    evidence: Kalshi's AIRPORTDELAY product terms identify FlightAware as the primary Source Agency for the KXFLYCANC
+      airport-cancellation family.
   - name: Kalshi weekly U.S. flight cancellation family
     source: kalshi
     external_id_prefixes:
@@ -151,7 +157,8 @@ organizations:
     theme: Flight cancellation markets
     categories:
     - oracle_and_data_dependency
-    evidence: The Kalshi weekly U.S. flight-cancellation family has been publicly linked to FlightAware as a settlement-data source. Confirm the current iteration's rules or source link before escalation.
+    evidence: The Kalshi weekly U.S. flight-cancellation family has been publicly linked to FlightAware as a settlement-data
+      source. Confirm the current iteration's rules or source link before escalation.
   - name: FlightAware settlement-source metadata
     source: kalshi
     evidence_terms:
@@ -161,7 +168,8 @@ organizations:
     theme: Flight cancellation markets
     categories:
     - oracle_and_data_dependency
-    evidence: Kalshi series metadata identifies or links to FlightAware as a settlement source even when the visible contract wording uses a generic source label.
+    evidence: Kalshi series metadata identifies or links to FlightAware as a settlement source even when the visible
+      contract wording uses a generic source label.
 - name: Flight cancellation markets
   profile_type: theme
   enabled: true
@@ -197,9 +205,12 @@ organizations:
   - Threat Intelligence
   - Legal
   playbook:
-  - Identify the contract family and the primary and fallback data sources used to settle the cancellation count or rate.
-  - Separate ordinary weather and operational disruption from deliberate interference, data-quality issues, or advance information.
-  - Map affected airlines, airports, source agencies, and operational owners before escalating the market to any one company.
+  - Identify the contract family and the primary and fallback data sources used to settle the cancellation count
+    or rate.
+  - Separate ordinary weather and operational disruption from deliberate interference, data-quality issues, or advance
+    information.
+  - Map affected airlines, airports, source agencies, and operational owners before escalating the market to any
+    one company.
   dependency_rules:
   - name: Kalshi airport cancellation product family
     source: kalshi
@@ -213,7 +224,8 @@ organizations:
     categories:
     - availability_and_incident
     - oracle_and_data_dependency
-    evidence: Known Kalshi airport-cancellation family; surface every contract in the family under the flight-cancellation theme regardless of visible wording.
+    evidence: Known Kalshi airport-cancellation family; surface every contract in the family under the flight-cancellation
+      theme regardless of visible wording.
   - name: Kalshi weekly U.S. flight cancellation family
     source: kalshi
     external_id_prefixes:
@@ -225,7 +237,8 @@ organizations:
     confidence: verified
     categories:
     - availability_and_incident
-    evidence: Known Kalshi weekly U.S. flight-cancellation family; surface every contract in the family under the flight-cancellation theme.
+    evidence: Known Kalshi weekly U.S. flight-cancellation family; surface every contract in the family under the
+      flight-cancellation theme.
 - name: YouTube
   enabled: true
   aliases:
@@ -263,8 +276,10 @@ organizations:
   - Product Analytics
   - Security
   playbook:
-  - Compare the referenced engagement with account-age, device, geography, referral-source, paid-promotion, and retention cohorts.
-  - Determine whether the resolution source is a public YouTube counter, chart, or enforcement decision that could be directly influenced.
+  - Compare the referenced engagement with account-age, device, geography, referral-source, paid-promotion, and
+    retention cohorts.
+  - Determine whether the resolution source is a public YouTube counter, chart, or enforcement decision that could
+    be directly influenced.
   - Separate creator-controlled behavior from platform abuse before changing detection models or product decisions.
   profile_type: organization
 - name: MrBeast / Beast Industries
@@ -301,9 +316,12 @@ organizations:
   - Security
   - Analytics
   playbook:
-  - Identify employees, production partners, agencies, sponsors, or vendors with advance access to scripts, upload timing, titles, or release plans.
-  - Distinguish outcomes the creator can directly control from outcomes requiring coordinated audience or platform manipulation.
-  - Review unusual engagement separately from paid promotion and preserve the relevant production and analytics timeline.
+  - Identify employees, production partners, agencies, sponsors, or vendors with advance access to scripts, upload
+    timing, titles, or release plans.
+  - Distinguish outcomes the creator can directly control from outcomes requiring coordinated audience or platform
+    manipulation.
+  - Review unusual engagement separately from paid promotion and preserve the relevant production and analytics
+    timeline.
   profile_type: organization
 - name: OpenAI / ChatGPT
   enabled: true
@@ -350,8 +368,10 @@ organizations:
   - Communications
   - Finance
   playbook:
-  - Classify the contract as a direct-control or advance-knowledge event, an availability event, an external benchmark, or a financial-reporting outcome.
-  - Identify employees, contractors, evaluation partners, cloud providers, and launch partners with advance access to the relevant answer.
+  - Classify the contract as a direct-control or advance-knowledge event, an availability event, an external benchmark,
+    or a financial-reporting outcome.
+  - Identify employees, contractors, evaluation partners, cloud providers, and launch partners with advance access
+    to the relevant answer.
   - Compare market creation and odds movement with deployment, status, benchmark, pricing, and announcement timelines.
   - Preserve the contract and supporting telemetry without treating a prediction or position as evidence of misconduct.
   profile_type: organization
@@ -390,8 +410,10 @@ organizations:
   - Legal
   playbook:
   - Confirm the exact App Store chart, geography, category, device, and observation time used to settle the contract.
-  - Compare ranking movement with install source, retention, geography, device concentration, paid acquisition, search activity, and review velocity.
-  - Warn Product, Growth, and leadership not to treat a market-linked ranking spike as durable demand until cohort quality is validated.
+  - Compare ranking movement with install source, retention, geography, device concentration, paid acquisition,
+    search activity, and review velocity.
+  - Warn Product, Growth, and leadership not to treat a market-linked ranking spike as durable demand until cohort
+    quality is validated.
   profile_type: organization
   dependency_rules:
   - name: Kalshi top U.S. iPhone app markets
@@ -443,7 +465,7 @@ organizations:
   - top paid app
   - highest ranking app
   - number one iPhone app
-  - #1 iPhone app
+  - '#1 iPhone app'
   products: []
   executives: []
   metrics:
@@ -462,9 +484,12 @@ organizations:
   - Trust & Safety
   - App Store Integrity
   playbook:
-  - Extract the app or company named as each outcome and identify which team owns acquisition, analytics, and product prioritization.
-  - Test whether ranking movement came from durable users or concentrated paid, coordinated, automated, or low-retention activity.
-  - Add a caveat to internal dashboards before Engineering, Growth, or leadership reallocates resources around the apparent demand signal.
+  - Extract the app or company named as each outcome and identify which team owns acquisition, analytics, and product
+    prioritization.
+  - Test whether ranking movement came from durable users or concentrated paid, coordinated, automated, or low-retention
+    activity.
+  - Add a caveat to internal dashboards before Engineering, Growth, or leadership reallocates resources around the
+    apparent demand signal.
   dependency_rules:
   - name: App Store ranking contract language
     terms:
@@ -480,7 +505,72 @@ organizations:
     - popularity_and_ranking
     - engagement_manipulation
     - oracle_and_data_dependency
-    evidence: The market settles from a public App Store ranking or chart and can create a financially incentivized demand signal around the named app.
+    evidence: The market settles from a public App Store ranking or chart and can create a financially incentivized
+      demand signal around the named app.
+- name: Earnings-call mention markets
+  profile_type: theme
+  enabled: true
+  aliases:
+  - earnings call
+  - earnings-call
+  - quarterly earnings call
+  - next earnings call
+  - investor call
+  - earnings conference call
+  - official earnings transcript
+  - earnings transcript
+  - say during earnings
+  - mention during earnings
+  - during the earnings call
+  products: []
+  executives: []
+  metrics:
+  - will say
+  - will mention
+  - say during
+  - mention during
+  - exact word
+  - exact phrase
+  - mention count
+  - word count
+  - number of times
+  - prepared remarks
+  - call transcript
+  - official transcript
+  - call audio
+  stakeholders:
+  - Corporate Compliance
+  - Insider Risk
+  - Legal
+  - Investor Relations
+  - Communications
+  - Corporate Secretary
+  - Vendor Risk
+  - Finance
+  playbook:
+  - Extract the company and exact word, phrase, or mention threshold that determines settlement.
+  - Map everyone with pre-public access to prepared remarks, scripts, transcripts, audio, approvals, and rehearsal
+    materials, including external agencies and production vendors.
+  - Determine whether employee, contractor, vendor, and household trading policies explicitly cover prediction markets
+    and event contracts.
+  - Compare probability, volume, and open-interest movement with the drafting, approval, rehearsal, release, and
+    public-call timeline.
+  - Escalate only when market activity overlaps with credible access, direct control, unusual timing, or another
+    independent indicator.
+  dependency_rules:
+  - name: Earnings-call controlled-language contract
+    terms:
+    - earnings call
+    - earnings conference call
+    - investor call
+    - prepared remarks
+    - earnings transcript
+    confidence: verified
+    categories:
+    - corporate_controlled_outcome
+    - direct_control_and_advance_knowledge
+    evidence: The contract is resolved from language delivered or recorded in a company-controlled earnings call,
+      prepared remarks, official audio, or transcript.
 - name: Example Company
   enabled: false
   aliases:
@@ -555,7 +645,8 @@ risk_categories:
     - Trust & Safety
     - Data Science
     actions:
-    - Increase monitoring for automation, new-account velocity, repeated devices, concentrated traffic sources, and low-retention engagement.
+    - Increase monitoring for automation, new-account velocity, repeated devices, concentrated traffic sources,
+      and low-retention engagement.
   availability_and_incident:
     weight: 28
     terms:
@@ -586,7 +677,8 @@ risk_categories:
     - Incident Response
     - Threat Intelligence
     actions:
-    - Compare market timing and movement with availability telemetry, security alerts, operational disruptions, vulnerability disclosures, and incident-response activity.
+    - Compare market timing and movement with availability telemetry, security alerts, operational disruptions,
+      vulnerability disclosures, and incident-response activity.
   oracle_and_data_dependency:
     weight: 22
     terms:
@@ -614,8 +706,10 @@ risk_categories:
     - Data Partnerships
     - Brand Protection
     actions:
-    - Preserve the exact settlement language and identify the organization whose data, counter, status page, or trademark determines the payout.
-    - Confirm whether the data and brand use is authorized and whether reliance creates operational, contractual, reputational, or safety exposure.
+    - Preserve the exact settlement language and identify the organization whose data, counter, status page, or
+      trademark determines the payout.
+    - Confirm whether the data and brand use is authorized and whether reliance creates operational, contractual,
+      reputational, or safety exposure.
   benchmark_and_evaluation_integrity:
     weight: 22
     terms:
@@ -637,7 +731,8 @@ risk_categories:
     - Product Security
     - Research Operations
     actions:
-    - Compare the market's resolution benchmark with controlled evaluations and review whether submissions, voting, contamination, or disclosure timing could affect the result.
+    - Compare the market's resolution benchmark with controlled evaluations and review whether submissions, voting,
+      contamination, or disclosure timing could affect the result.
   direct_control_and_advance_knowledge:
     weight: 22
     terms:
@@ -659,13 +754,19 @@ risk_categories:
     - launch date
     - model release
     - frontier model
+    - earnings call
+    - earnings conference call
+    - investor call
+    - earnings transcript
+    - official transcript
     stakeholders:
     - Legal
     - Compliance
     - Insider Risk
     - Creator Operations
     actions:
-    - Identify people with direct control of, or advance access to, the outcome and review relevant employee, contractor, and vendor obligations.
+    - Identify people with direct control of, or advance access to, the outcome and review relevant employee, contractor,
+      and vendor obligations.
   platform_action:
     weight: 20
     terms:
@@ -692,7 +793,8 @@ risk_categories:
     - Communications
     - Trust & Safety
     actions:
-    - Check whether reports, complaints, policy-enforcement queues, publication timing, pricing, or launch decisions could be gamed before settlement.
+    - Check whether reports, complaints, policy-enforcement queues, publication timing, pricing, or launch decisions
+      could be gamed before settlement.
   user_growth:
     weight: 18
     terms:
@@ -764,3 +866,34 @@ risk_categories:
     - Legal
     actions:
     - Escalate for immediate abuse review and preserve relevant logs under the incident-retention policy.
+  corporate_controlled_outcome:
+    weight: 26
+    terms:
+    - earnings call
+    - earnings-call
+    - earnings conference call
+    - investor call
+    - prepared remarks
+    - official transcript
+    - earnings transcript
+    - call transcript
+    - call audio
+    - will say
+    - will mention
+    - say during
+    - mention during
+    - exact word
+    - exact phrase
+    - number of times
+    - mention count
+    stakeholders:
+    - Corporate Compliance
+    - Insider Risk
+    - Legal
+    - Investor Relations
+    - Communications
+    - Vendor Risk
+    actions:
+    - Identify everyone with pre-public access to the prepared language and confirm prediction-market policy coverage.
+    - Preserve the contract, official call audio or transcript, drafting timeline, approval trail, and material
+      market movements through settlement.

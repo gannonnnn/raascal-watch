@@ -67,7 +67,7 @@
             <article><h3>Could the outcome be influenced?</h3><strong>{{ mat.dimensions.influenceability.label }}</strong><ul>{% for item in mat.dimensions.influenceability.rationales %}<li>{{ item }}</li>{% endfor %}</ul></article>
             <article><h3>What should the company do?</h3><strong>{{ mat.response.headline }}</strong><ol>{% for item in mat.response.steps %}<li>{{ item }}</li>{% endfor %}</ol></article>
           </div>
-          {% if contract.dynamic_subjects %}<p class="field-note-small"><strong>Dynamic subjects:</strong> {{ contract.dynamic_subjects | join(', ') }}</p>{% endif %}
+          {% if contract.dynamic_subjects %}<p class="field-note-small"><strong>{% if 'Earnings-call mention markets' in contract.organizations %}Dynamic company / controlled outcomes{% elif 'App Store ranking markets' in contract.organizations %}Dynamic apps / outcomes{% else %}Dynamic subjects{% endif %}:</strong> {{ contract.dynamic_subjects | join(', ') }}</p>{% endif %}
         </section>
       {% endif %}
       <section class="field-note-section">
