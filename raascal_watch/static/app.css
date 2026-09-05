@@ -834,3 +834,15 @@ td { border-top: 1px solid var(--line); padding: 11px 10px; white-space: nowrap;
   .score-component small { grid-column: 1 / -1; }
   .dynamic-subject-line { flex-direction: column; gap: 0.35rem; }
 }
+
+/* v0.9.1: progress is independent of the review queue and never blocks controls. */
+[hidden] { display: none !important; }
+.scan-progress-panel { margin: 0 0 24px; border: 1px solid #bed5cf; border-radius: 16px; padding: 20px 24px; background: #eef7f4; }
+.scan-progress-heading { display: flex; gap: 16px; justify-content: space-between; }
+.scan-progress-panel p { margin: 8px 0; }
+.scan-progress-source { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.scan-progress-source strong { min-width: 110px; text-transform: capitalize; }
+.scan-progress-source progress { width: 100%; height: 8px; }
+.scan-progress-warning { color: #785115; }
+#system-state-text { font-weight: inherit; }
+#cancel-scan-button { cursor: pointer; padding: 12px; border: 1px solid #688; border-radius: 10px; }

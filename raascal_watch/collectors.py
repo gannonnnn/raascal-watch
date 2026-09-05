@@ -4,7 +4,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -125,6 +125,11 @@ async def get_json(
 
 class MarketCollector(ABC):
     name: str
+    progress_callback: Callable[..., None] | None = None
+
+    def report_progress(self, **values: Any) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(**values)
 
     @abstractmethod
     async def fetch(
@@ -360,6 +365,7 @@ class KalshiCollector(MarketCollector):
                             # verified dependency distinct from a direct name mention.
                             parsed.raw = {**parsed.raw, "_raascal_series": metadata}
                         records[parsed.external_id] = parsed
+                self.report_progress(pages=pages, downloaded=len(records))
                 next_cursor = payload.get("cursor")
                 return str(next_cursor) if next_cursor else None
 
@@ -577,6 +583,7 @@ class KalshiCollector(MarketCollector):
 
                 if broad_pages >= page_limit:
                     mode = "incremental" if incremental else "baseline"
+                    self.report_progress(warning="Catalog discovery reached its local page cap; coverage may be partial.")
                     logger.warning(
                         "Kalshi %s discovery reached the configured page limit", mode
                     )
@@ -751,11 +758,13 @@ class PolymarketCollector(MarketCollector):
                         continue
                     for parsed in self.parse_event(event):
                         records[parsed.external_id] = parsed
+                self.report_progress(pages=pages, downloaded=len(records))
                 next_cursor = payload.get("next_cursor")
                 if not next_cursor or next_cursor == cursor:
                     break
                 cursor = str(next_cursor)
-            if pages >= settings.max_pages_per_source:
+            if pages >= settings.max_pages_per_source and next_cursor:
+                self.report_progress(warning="Catalog discovery reached its local page cap; coverage may be partial.")
                 logger.warning("Polymarket scan reached the configured page limit")
             return SourceFetchResult(self.name, list(records.values()), pages)
         except Exception as exc:  # collector boundary: preserve other sources

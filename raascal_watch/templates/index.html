@@ -425,7 +425,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RaaScal Watch</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v={{ version }}">
 </head>
 <body>
   <header class="topbar">
@@ -437,14 +437,22 @@
       </div>
     </div>
     <div class="topbar-actions">
-      <div class="system-state {{ 'running' if scanner_running else '' }}">
-        <span></span>{{ 'Scanning' if scanner_running else 'Monitoring' }}
+      <div id="system-state" class="system-state {{ 'running' if scanner_running else '' }}">
+        <span></span><b id="system-state-text">{{ 'Scanning' if scanner_running else 'Ready' }}</b>
       </div>
-      <button id="scan-button" class="primary-button" type="button">Run scan</button>
+      <button id="scan-button" class="primary-button" type="button" {{ 'disabled' if scanner_running else '' }}>{{ 'Scanning…' if scanner_running else 'Run scan' }}</button>
+      <button id="cancel-scan-button" class="secondary-button" type="button" hidden>Stop scan</button>
     </div>
   </header>
 
   <main class="page-shell">
+    <section class="scan-progress-panel" id="scan-progress-panel" aria-label="Scan progress" hidden>
+      <div class="scan-progress-heading"><strong id="scan-progress-title">Scan progress</strong><span id="scan-progress-elapsed"></span></div>
+      <p id="scan-progress-message" role="status" aria-live="polite"></p>
+      <div id="scan-progress-sources"></div>
+      <p class="small-muted">Downloaded records are not review findings. Saved matches may appear before processing finishes; coverage and counts remain partial during a scan.</p>
+      <a id="scan-results-refresh" href="" hidden>Refresh to see saved results</a>
+    </section>
     <section class="hero">
       <div>
         <p class="eyebrow">Live prediction-market monitoring MVP</p>
@@ -751,6 +759,6 @@
   </main>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="{{ url_for('static', path='/app.js') }}"></script>
+  <script src="{{ url_for('static', path='/app.js') }}?v={{ version }}"></script>
 </body>
 </html>

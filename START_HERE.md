@@ -1,181 +1,48 @@
-# Start RaaScal Watch
+# Start RaaScal Watch v0.9.1
 
-## Easiest method on a Mac
+## First launch from a fresh repository download (Mac)
 
-Run `start-raascal-watch.command`.
+1. Install Python 3.11 or newer. Unzip the complete source project.
+2. Confirm `.env.example` and `.gitignore` are next to `pyproject.toml` at the top
+   level, not inside `raascal_watch/templates`.
+3. Open Terminal. Type `bash ` (including the space), drag
+   `start-raascal-watch.command` into Terminal, and press Return.
+4. Keep Terminal open. Open `http://127.0.0.1:8000` after the server starts.
 
-The first launch creates a private Python environment, installs the project, synchronizes newly shipped organization profiles into the local watchlist, re-evaluates stored markets when that watchlist changes, removes any synthetic records left by older versions, starts the dashboard, and opens:
+The installer creates your own `.venv`, `.env`, and database. They do not come
+from GitHub. The first collection starts automatically unless disabled in your
+settings. It can take minutes; the progress panel reports each source separately.
+No synthetic demo data is added on normal startup.
 
-`http://127.0.0.1:8000`
+## Every later launch
 
-If macOS blocks the file, use Terminal:
+Run the same `start-raascal-watch.command` from the SAME project folder. Creating
+another fresh folder also creates a separate database; it does not import prior
+results or reviewer decisions.
 
-```bash
-bash "/path/to/raascal-watch/start-raascal-watch.command"
-```
+**Run scan** starts one background job. Filters remain usable while it runs.
+**Stop scan** retains saved batches. To stop the entire app, press Control+C in
+Terminal and wait for the prompt. Do not delete SQLite journal/WAL files.
 
-Keep the Terminal window open while using the dashboard. Press **Control-C** in that window to stop the service.
+When processing finishes, the dashboard refreshes unless you are editing a review
+or reading an expanded card. In that case, save your work and use the refresh link.
+The default Review today tab is narrower than All active; a zero there is not a
+claim that no relevant contracts exist.
 
-The old `start-demo.command` filename still works for compatibility, but normal startup no longer loads synthetic demo data.
+## Recovery / read-only browsing session
 
-## Manual setup
-
-```bash
-cd raascal-watch
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env
-raascal-watch sync-profiles --defaults ./config/watchlist.defaults.yaml
-raascal-watch validate-config
-raascal-watch purge-demo
-raascal-watch serve
-```
-
-
-## Organization profile synchronization
-
-Every enabled organization and monitored theme appears in the profile filter, including profiles with zero current matches. The number beside each profile is the active or archived contract count for the selected view.
-
-When a release adds a profile, RaaScal Watch merges it into the existing `config/watchlist.yaml`, preserves custom organizations and local terms, creates a timestamped backup, and re-evaluates stored market records. A fingerprint prevents the large re-index from repeating on every launch.
-
-Run the synchronization manually with:
+From inside the project folder, with no other copy running:
 
 ```bash
-raascal-watch sync-profiles --defaults ./config/watchlist.defaults.yaml
+RAASCAL_RUN_SCAN_ON_STARTUP=false .venv/bin/python -m raascal_watch.cli serve
 ```
 
-Add `--force` only when you intentionally want to re-evaluate the stored library again.
+This disables the automatic scan scheduler for that session; the manual button
+still works. Do not change or share your `.env` just to troubleshoot.
 
+## Sharing with an engineering reviewer
 
-## Flight-cancellation monitoring
-
-Use the profile filter in two ways:
-
-- Select **Flight cancellation markets — theme** to see qualifying cancellation contracts without assigning them to one data provider.
-- Select **FlightAware** to see direct, verified, or linked FlightAware relationships only.
-
-A known FlightAware-dependent contract can carry both profiles while appearing once in the dashboard. The review panel explains whether the relationship is direct, verified, linked, or theme-only.
-
-The Kalshi collector directly queries series referenced by dependency rules, so the weekly `KXUSFLYCAN` family and discovered `KXFLYCANC...` airport series are not dependent on their position in the broad market pagination.
-
-## Materiality queue, active contracts, and archive
-
-The default page opens on **Review today**, not the complete active library. RaaScal Watch uses:
-
-- **Escalate now** for the strongest time-bound signals;
-- **Review today** for contracts with a credible pathway and current activation trigger;
-- **Observed** for relevant intelligence that does not require human action today; and
-- **All active** when a reviewer intentionally wants the full candidate library.
-
-Closed or expired contracts are retained under the separate **Archive** tab and have no current-review controls. Filters update automatically when a selection changes; there is no Apply button. Related thresholds and dates are grouped beneath a collapsible series.
-
-Run a quick queue summary from Terminal with:
-
-```bash
-raascal-watch materiality-summary
-```
-
-## App Store ranking monitoring
-
-Use the profile filter in two complementary ways:
-
-- Select **App Store ranking markets — theme** to see active contracts tied to public App Store chart outcomes.
-- Select **Apple App Store** to review the platform as metric owner and potential resolution source.
-
-RaaScal Watch extracts changing app/company outcomes dynamically and displays them as **Dynamic apps / outcomes** on the contract card. It does not automatically create a permanent organization profile or accuse the named app of manipulation.
-
-The tailored guidance asks whether ranking movement reflects durable users or concentrated paid, coordinated, automated, review-driven, or low-retention activity before Product, Growth, Engineering, or leadership treats the signal as organic demand.
-
-## Earnings-call mention monitoring
-
-Select **Earnings-call mention markets — theme** to review contracts tied to words, phrases, mention counts, prepared remarks, official call audio, or transcripts.
-
-RaaScal Watch extracts the changing company and controlled outcome dynamically. A result may display:
-
-```text
-Company: Dell
-Controlled outcome: Agentic
-```
-
-The review panel focuses on direct control, pre-public access, settlement timing, policy coverage, external vendors, and unexplained market movement. A theme match is not evidence that an employee, executive, vendor, or trader misused information.
-
-Use **Open Field Note** for the screenshot-ready headline **What if the answer is already in the script?**
-
-## Incentive Maps, Field Notes, and post-close review
-
-Open **Review guidance and record an assessment** on an active contract to see its Incentive Map:
-
-- **Who benefits?** YES and NO position holders, with illustrative gross upside per share from the displayed price.
-- **Who may know first?** Employees, vendors, partners, data operators, or other parties with plausible pre-public access.
-- **Who could influence it?** Actors capable of changing the metric, event, source data, decision, or public signal.
-- **Whose data settles it?** The named or inferred counter, status page, report, API, or decision source.
-- **Who bears the cost?** Internal teams, customers, partners, or leadership affected by a false or manipulated signal.
-
-Use **Open Field Note** to open a shareable, screenshot-friendly explanation of one contract/profile relationship.
-
-Use **Capture public visibility** to preserve the current public evidence surface. For Polymarket, this may include wallet-level size, average price, P&L, holders, and trades. For Kalshi, participant positions are not publicly attributable through the public market-data API, so the snapshot remains aggregate.
-
-After a contract closes, open **Archive → Post-close public visibility** and refresh the snapshot. This can show which public wallets benefited on Polymarket, but it cannot establish who controls a wallet, whether they had privileged access, or whether misconduct occurred.
-
-RaaScal Watch stores movement snapshots automatically when market values change. The dashboard may show the latest probability and cumulative-volume movement after repeated scans.
-
-## Reviewer feedback and calibration
-
-Open **Review guidance and record an assessment** on an active contract. The same contract may have several matched profiles, and each profile is assessed separately. Choose:
-
-- **Actionable**
-- **Monitor**
-- **Informational**
-- **False positive**
-
-Optional fields let you explain the decision, rate the suggested guidance, correct the inferred role, propose a better owner, and add a note. The calibration panel summarizes review quality by profile and risk pathway.
-
-Use the **Reviewer decision** filter or **Unreviewed first** sorting to work through the queue. Historical assessments remain visible after a contract moves to Archive, but archived records cannot be edited as current work.
-
-Export feedback with:
-
-```bash
-raascal-watch export-feedback --format csv --view all --output ./exports/reviewer_feedback.csv
-```
-
-## Contract-specific review guidance
-
-Open **Review guidance and record an assessment** on a current result to see the likely organization role, why it surfaced, questions to answer, suggested owners, and first review steps tailored to that contract's title, rules, source, probability, volume, and close time.
-
-To regenerate this guidance for records already in the local database without another API scan:
-
-```bash
-raascal-watch refresh-guidance
-```
-
-## Live-only behavior
-
-- Dashboard totals and results exclude synthetic `demo` records by default.
-- The standard launcher permanently removes old demo records from the local database.
-- Kalshi and Polymarket history is preserved.
-- The first successful live scan of each source remains a silent baseline.
-
-## Explicit developer demo
-
-```bash
-raascal-watch seed-demo
-```
-
-Then open:
-
-`http://127.0.0.1:8000/?source=demo&include_demo=true`
-
-## Kalshi source note
-
-RaaScal Watch first uses Kalshi's documented `external-api` production host. If that host returns HTTP 403/404 or cannot be reached, it automatically retries through Kalshi's supported `api.elections` compatibility host.
-
-## Refreshing existing contract guidance
-
-The updater refreshes stored matches automatically after it copies the new code. To run it manually:
-
-```bash
-raascal-watch refresh-guidance
-```
-
-This updates the role, review questions, and contract-specific next steps without deleting live history or requiring another API pull.
+Commit the clean source package to GitHub. The reviewer can pull the updated code
+and run the launcher. Existing `.env` and database files stay local. Test with
+`python -m pytest` and `python tools/smoke_startup.py` after installing `.[dev]`.
+This is still local, unauthenticated prototype software, not a hosted service.

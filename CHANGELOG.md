@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+
+Fix blocked dashboard during first scans; offload scoring/writes into bounded batches; add 202 scan jobs, lightweight progress, cooperative cancellation, worker-safe SQLite transactions, responsive request handlers, root-file regression checks and clean-start CI. See UPDATE_NOTES_V0_9_1.md.
+
+
 ## 0.9.0 — Earnings-call mention markets and corporate-controlled outcomes
 
 - Added the **Earnings-call mention markets** monitored theme.

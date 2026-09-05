@@ -23,6 +23,28 @@ The company named in the market is not always the only party exposed. An organiz
 
 RaaScal Watch is intended to surface that changed incentive environment before the signal is accepted at face value.
 
+## Version 0.9.1: responsive scans and visible progress
+
+This maintenance release fixes the frozen-dashboard behavior during a large
+first scan. Matching and SQLite writes now run in bounded worker batches;
+filters and status checks remain available while the scan processes records.
+A progress panel shows downloaded versus saved records, and **Stop scan** retains
+committed work without marking an unfinished source successful.
+
+The full local scan can still take minutes. Page caps still limit source coverage.
+See `UPDATE_NOTES_V0_9_1.md` for the fix, tests, API change, and limitations.
+
+For a clean engineering check after installing the project:
+
+```bash
+python -m pytest
+python tools/smoke_startup.py
+```
+
+The second command uses a temporary database and no external API calls. A new
+`.github/workflows/tests.yml` runs both checks on GitHub for future pushes and
+pull requests. GitHub Actions must be enabled for that workflow to run.
+
 ## Version 0.9: earnings-call mention markets and corporate-controlled outcomes
 
 RaaScal Watch now includes **Earnings-call mention markets** as a monitored theme. It surfaces contracts resolved by a company saying, mentioning, repeating, or avoiding a specific word or phrase during an earnings call or investor call.

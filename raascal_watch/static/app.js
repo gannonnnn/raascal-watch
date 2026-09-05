@@ -23,22 +23,125 @@ if (filterForm) {
   });
 }
 
+// No long-running POST: accept a scan, then poll the cheap status endpoint.
+const stopScanButton = document.getElementById('cancel-scan-button');
+const progressPanel = document.getElementById('scan-progress-panel');
+let reviewerHasUnsavedChanges = false;
+let watchedRunId = null;
+let refreshedRunId = null;
+let lastRunning = false;
+let polling = false;
+
+document.querySelectorAll('[data-feedback-form]').forEach((form) => {
+  form.addEventListener('input', () => { reviewerHasUnsavedChanges = true; });
+  form.addEventListener('change', () => { reviewerHasUnsavedChanges = true; });
+});
+
+async function scanRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(path, { ...options, cache: 'no-store', signal: controller.signal });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || 'Scan request failed');
+    return payload;
+  } finally { window.clearTimeout(timer); }
+}
+
+function renderScanProgress(status) {
+  const running = Boolean(status.running);
+  lastRunning = running;
+  if (running) watchedRunId = status.run_id;
+  if (scanButton) {
+    scanButton.disabled = running;
+    scanButton.textContent = running ? 'Scanning…' : 'Run scan';
+  }
+  if (stopScanButton) {
+    stopScanButton.hidden = !running;
+    stopScanButton.disabled = Boolean(status.cancel_requested);
+    stopScanButton.textContent = status.cancel_requested ? 'Stopping…' : 'Stop scan';
+  }
+  const stateLabel = document.getElementById('system-state-text');
+  if (stateLabel) stateLabel.textContent = running ? (status.cancel_requested ? 'Stopping' : 'Scanning') : (status.state === 'failed' || status.state === 'partial' ? 'Check source status' : 'Ready');
+  document.getElementById('system-state')?.classList.toggle('running', running);
+  if (progressPanel) {
+    progressPanel.hidden = status.state === 'idle';
+    document.getElementById('scan-progress-title').textContent = running ? 'Scan in progress — dashboard remains available' : 'Latest scan';
+    document.getElementById('scan-progress-elapsed').textContent = `${Math.floor((status.elapsed_seconds || 0) / 60)}m ${Math.floor((status.elapsed_seconds || 0) % 60)}s`;
+    document.getElementById('scan-progress-message').textContent = status.message || '';
+    const sources = document.getElementById('scan-progress-sources');
+    sources.replaceChildren();
+    for (const [name, source] of Object.entries(status.sources || {})) {
+      const row = document.createElement('div');
+      row.className = 'scan-progress-source';
+      const heading = document.createElement('strong'); heading.textContent = name;
+      const detail = document.createElement('span');
+      detail.textContent = `${source.phase} · ${Number(source.pages || 0).toLocaleString()} pages · ${Number(source.downloaded || 0).toLocaleString()} downloaded · ${Number(source.processed || 0).toLocaleString()} saved · ${Number(source.matches || 0).toLocaleString()} profile matches`;
+      row.append(heading, detail);
+      if (source.phase === 'processing' && source.downloaded > 0) {
+        const bar = document.createElement('progress');
+        bar.max = source.downloaded; bar.value = source.processed || 0;
+        bar.setAttribute('aria-label', `${name}: processing downloaded records`);
+        row.append(bar);
+      }
+      sources.append(row);
+      for (const warning of [...(source.warnings || []), ...(source.error ? [source.error] : [])]) {
+        const note = document.createElement('p'); note.className = 'scan-progress-warning'; note.textContent = warning; sources.append(note);
+      }
+    }
+    if (running && status.seconds_since_progress > 30) {
+      const note = document.createElement('p');
+      note.textContent = 'No new progress recently. The source may be retrying or a batch may be slow. You can stop this scan without deleting saved results.';
+      sources.append(note);
+    }
+  }
+  // Do not lose a draft assessment or interrupt an expanded investigation.
+  const refreshLink = document.getElementById('scan-results-refresh');
+  if (refreshLink) {
+    refreshLink.hidden = !status.run_id || (running && !status.processed);
+    refreshLink.textContent = running ? 'View saved results so far (scan continues)' : 'Refresh to see saved results';
+  }
+  if (!running && watchedRunId === status.run_id && refreshedRunId !== status.run_id) {
+    refreshedRunId = status.run_id;
+    const reading = Boolean(document.querySelector('details[open]'));
+    if (!reviewerHasUnsavedChanges && !reading) {
+      window.setTimeout(() => { if (!reviewerHasUnsavedChanges && !document.querySelector('details[open]')) window.location.reload(); }, 500);
+    } else {
+      showToast('Scan finished. Your open review is preserved; refresh when ready.');
+    }
+  }
+}
+
+async function pollScanProgress() {
+  if (polling || !progressPanel) return;
+  polling = true;
+  try { renderScanProgress(await scanRequest('/api/scan/status')); }
+  catch (error) {
+    progressPanel.hidden = false;
+    document.getElementById('scan-progress-message').textContent = 'Cannot reach the local server right now. This does not confirm the scan has stopped. Check Terminal; do not start another copy.';
+  } finally {
+    polling = false;
+    window.setTimeout(pollScanProgress, lastRunning ? 2000 : 5000);
+  }
+}
+if (progressPanel) pollScanProgress();
+
 if (scanButton) {
   scanButton.addEventListener('click', async () => {
     scanButton.disabled = true;
-    scanButton.textContent = 'Scanning…';
-    try {
-      const response = await fetch('/api/scan', { method: 'POST' });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Scan failed');
-      showToast(`Scan complete: ${payload.fetched} markets, ${payload.new_markets} new, ${payload.notifications} alerts.`);
-      // Reload the current URL so organization/source/sort filters remain intact.
-      window.setTimeout(() => window.location.reload(), 700);
-    } catch (error) {
-      showToast(error.message || 'Scan failed', true);
-      scanButton.disabled = false;
-      scanButton.textContent = 'Run scan';
+    try { renderScanProgress(await scanRequest('/api/scan', { method: 'POST' })); }
+    catch (error) {
+      showToast(error.message || 'Could not start scan', true);
+      // Check server state before offering another start after a timeout/conflict.
+      try { renderScanProgress(await scanRequest('/api/scan/status')); } catch (_) { /* keep disabled until next successful poll */ }
     }
+  });
+}
+if (stopScanButton) {
+  stopScanButton.addEventListener('click', async () => {
+    stopScanButton.disabled = true;
+    try { renderScanProgress(await scanRequest('/api/scan/cancel', { method: 'POST' })); }
+    catch (error) { showToast('Stop request could not be confirmed. Check Terminal.', true); }
   });
 }
 

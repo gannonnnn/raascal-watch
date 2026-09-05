@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .db import Database
@@ -177,9 +178,11 @@ async def _scheduled_scans() -> None:
     await asyncio.sleep(1)
     while True:
         try:
-            await scanner.scan(wait_for_lock=True)
+            await scanner.scan(wait_for_lock=False)
         except asyncio.CancelledError:
             raise
+        except ScannerBusyError:
+            logger.info("Scheduled scan skipped: a scan is already running")
         except Exception:
             logger.exception("Scheduled scan failed")
         await asyncio.sleep(settings.poll_interval_minutes * 60)
@@ -187,13 +190,14 @@ async def _scheduled_scans() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    database.initialize()
+    await run_in_threadpool(database.initialize)
     task: asyncio.Task[None] | None = None
     if settings.run_scan_on_startup:
         task = asyncio.create_task(_scheduled_scans())
     try:
         yield
     finally:
+        await scanner.close()
         if task:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -210,7 +214,7 @@ app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="s
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(
+def dashboard(
     request: Request,
     organization: str | None = Query(default=None),
     severity: str | None = Query(default=None),
@@ -222,7 +226,6 @@ async def dashboard(
     view: str = Query(default="active"),
     include_demo: bool = Query(default=False),
 ) -> HTMLResponse:
-    database.initialize()
     normalized_view = _normalize_view(view)
     normalized_sort = _normalize_sort(sort)
     normalized_gate = _normalize_gate(gate, view=normalized_view)
@@ -325,6 +328,7 @@ async def dashboard(
             "filtered_contract_count": result["total"],
             "scans": scans,
             "scanner_running": scanner.is_running,
+            "scan_status": scanner.status(),
             "watched_organizations": watched_profiles,
             "profile_types": profile_types,
             "organization_filter_options": organization_filter_options,
@@ -384,7 +388,7 @@ async def dashboard(
 
 
 @app.get("/api/matches")
-async def api_matches(
+def api_matches(
     organization: str | None = None,
     severity: str | None = None,
     source: str | None = None,
@@ -407,7 +411,7 @@ async def api_matches(
 
 
 @app.get("/api/contracts")
-async def api_contracts(
+def api_contracts(
     organization: str | None = None,
     severity: str | None = None,
     source: str | None = None,
@@ -434,7 +438,7 @@ async def api_contracts(
 
 
 @app.get("/api/contracts/{market_id}/public-exposure")
-async def get_public_exposure_snapshot(market_id: int) -> dict[str, Any]:
+def get_public_exposure_snapshot(market_id: int) -> dict[str, Any]:
     if database.get_market_record(market_id) is None:
         raise HTTPException(status_code=404, detail="Contract not found")
     exposure = database.latest_public_exposure(market_id)
@@ -445,7 +449,7 @@ async def get_public_exposure_snapshot(market_id: int) -> dict[str, Any]:
 
 @app.post("/api/contracts/{market_id}/public-exposure")
 async def public_exposure_snapshot(market_id: int) -> dict[str, Any]:
-    market = database.get_market_record(market_id)
+    market = await run_in_threadpool(database.get_market_record, market_id)
     if market is None:
         raise HTTPException(status_code=404, detail="Contract not found")
     try:
@@ -464,11 +468,11 @@ async def public_exposure_snapshot(market_id: int) -> dict[str, Any]:
             )
     except PublicExposureError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return database.save_public_exposure_snapshot(market_id, exposure)
+    return await run_in_threadpool(database.save_public_exposure_snapshot, market_id, exposure)
 
 
 @app.get("/field-note/{market_id}", response_class=HTMLResponse)
-async def field_note(
+def field_note(
     request: Request,
     market_id: int,
     organization: str | None = Query(default=None),
@@ -500,19 +504,35 @@ async def field_note(
     )
 
 
-@app.post("/api/scan")
+@app.post("/api/scan", status_code=202)
 async def api_scan() -> JSONResponse:
+    """Accept quickly; clients poll status rather than holding one long request."""
     try:
-        summary = await scanner.scan(wait_for_lock=False)
+        status = scanner.start_background()
     except ScannerBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except WatchlistError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return JSONResponse(jsonable_encoder(asdict(summary)))
+    return JSONResponse(status, status_code=202)
+
+
+@app.get("/api/scan/status")
+async def api_scan_status() -> JSONResponse:
+    return JSONResponse(scanner.status(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/scan/cancel", status_code=202)
+async def api_scan_cancel() -> JSONResponse:
+    scanner.cancel_current()
+    return JSONResponse(scanner.status(), status_code=202)
+
+
+@app.get("/health/live")
+async def liveness() -> dict[str, Any]:
+    # Cheap liveness is independent of expensive analytics or SQLite locks.
+    return {"status": "ok", "version": __version__, "scanner_running": scanner.is_running}
 
 
 @app.post("/api/matches/{match_id}/feedback")
-async def save_match_feedback(
+def save_match_feedback(
     match_id: int, payload: ReviewFeedbackPayload
 ) -> dict[str, Any]:
     match = database.get_match(match_id)
@@ -555,14 +575,14 @@ async def save_match_feedback(
 
 
 @app.get("/api/calibration")
-async def calibration(view: str = "active") -> dict[str, Any]:
+def calibration(view: str = "active") -> dict[str, Any]:
     return database.feedback_summary(
         view=_normalize_scope_view(view), include_demo=False
     )
 
 
 @app.get("/api/feedback")
-async def feedback_export(
+def feedback_export(
     view: str = "all", limit: int = Query(default=5000, ge=1, le=50000)
 ) -> list[dict[str, Any]]:
     return database.list_review_feedback(
@@ -573,7 +593,7 @@ async def feedback_export(
 
 
 @app.post("/api/matches/{match_id}/acknowledge")
-async def acknowledge(match_id: int) -> dict[str, Any]:
+def acknowledge(match_id: int) -> dict[str, Any]:
     # Retained for API compatibility. Historical records are deliberately not
     # reviewable through either the dashboard or the older row-level endpoint.
     match = database.get_match(match_id)
@@ -590,7 +610,7 @@ async def acknowledge(match_id: int) -> dict[str, Any]:
 
 
 @app.post("/api/contracts/{market_id}/acknowledge")
-async def acknowledge_contract(market_id: int) -> dict[str, Any]:
+def acknowledge_contract(market_id: int) -> dict[str, Any]:
     changed = database.acknowledge_market(market_id, utcnow())
     if not changed:
         if not database.market_is_active(market_id):
@@ -603,7 +623,7 @@ async def acknowledge_contract(market_id: int) -> dict[str, Any]:
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
+def health() -> dict[str, Any]:
     stats = database.dashboard_stats(include_demo=False, view="active")
     feedback = database.feedback_summary(include_demo=False, view="active")
     materiality = database.list_contract_groups(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -221,10 +222,17 @@ def _market_rules_hash(title: str, description: str) -> str:
 class Database:
     def __init__(self, path: Path):
         self.path = path
+        self._transactions = threading.local()
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
+        # A scan batch reuses its connection on this worker thread only. Web
+        # requests and other workers always get independent SQLite connections.
+        shared = getattr(self._transactions, "connection", None)
+        if shared is not None:
+            yield shared
+            return
         connection = sqlite3.connect(self.path, timeout=30.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -233,11 +241,28 @@ class Database:
         try:
             yield connection
             connection.commit()
-        except Exception:
+        except BaseException:
             connection.rollback()
             raise
         finally:
             connection.close()
+
+    @contextmanager
+    def write_batch(self) -> Iterator[sqlite3.Connection]:
+        """Atomic, bounded scan write; never share a connection between threads.
+
+        Scoring is done before entering this block, keeping the write lock short.
+        An exception rolls back this batch, not previously committed batches.
+        """
+        if getattr(self._transactions, "connection", None) is not None:
+            raise RuntimeError("Nested scan write batches are not supported")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._transactions.connection = connection
+            try:
+                yield connection
+            finally:
+                del self._transactions.connection
 
     def initialize(self) -> None:
         with self.connect() as connection:
